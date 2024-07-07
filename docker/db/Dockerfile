@@ -23,12 +23,19 @@ COPY ./static/db/init /docker-entrypoint-initdb.d
 WORKDIR /opt/pgcloud
 ENV WORKDIR=/opt/pgcloud
 ENV PGVERSION=16
-ENV PGDIR=/var/lib/postgresql
-ENV PGLOG=/var/log/postgresql
+ENV PGDATA=/opt/pgdata
 
+# Own directories
+ENV PGCBASE=/opt/pgcloud
+ENV PGCLOG=/opt/pgcloud/log
+
+# Copy new data
 COPY ./static/db/conf ./conf
 COPY ./static/db/script ./script
 COPY ./static/db/sys ./sys
+
+# Create folder
+RUN mkdir log
 
 # Make sure execution permissions
 RUN chmod +x ./sys/*.sh ./script/*.sh

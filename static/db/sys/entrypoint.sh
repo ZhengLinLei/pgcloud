@@ -2,7 +2,7 @@
 set -e
 
 # Check if it is first time
-if [ ! -d "$PGDIR/$PGVERSION/$PGNAME" ]; then
+if [ ! -f "$PGDATA/PG_VERSION" ] && []; then
     # First time
     $WORKDIR/sys/initdb.sh
     
@@ -21,3 +21,4 @@ fi
 echo "Running PostgreSQL as $NODE_ROLE role"
 echo "Listening in port ::$PGPORT"
 
+tail -f /dev/null
