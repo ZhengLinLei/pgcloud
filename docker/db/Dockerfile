@@ -1,46 +1,47 @@
-# Using ubuntu as base Operative system
-# Usig own base can detach postgres entrypoint.sh
-FROM ubuntu:24.04
+# Using postgresql 16 with own entrypoint
+# This image is used to create a PostgreSQL 16 image with own entrypoint
+# The entrypoint will create the database, user and password
+# The entrypoint will also start the PostgreSQL service
+FROM postgres:16
 
-# Make the shell noon interactive
-ENV DEBIAN_FRONTEND=noninteractive
+# Install and update
+RUN apt update
+RUN apt upgrade -y
 
-# Update and install PostgreSQL 16 - Default in Ubuntu 24.04
-RUN apt-get update
-RUN apt-get install -y  postgresql          \
-                    postgresql-contrib  \
-                    postgresql-client   \
-                    vim
-RUN apt-get clean
-RUN rm -rf /var/lib/apt/lists/*
+# Install dependencies
+RUN apt install -y  vim  \
+                    curl \
+                    wget \
+                    sudo \
+                    procps \
+                    net-tools \
+                    iputils-ping \
+                    htop
 
-
-# Copy all init files to PostgreSQL image
-COPY ./static/db/init /docker-entrypoint-initdb.d
-
+# Set the default shell
+RUN echo "alias grep='grep --color=auto'" >> /root/.bashrc
+RUN echo "alias ls='ls --color=auto'" >> /root/.bashrc
 
 # Copy files to workdir
 WORKDIR /opt/pgcloud
-ENV WORKDIR=/opt/pgcloud
-ENV PGVERSION=16
-ENV PGDATA=/opt/pgdata
 
-# Own directories
-ENV PGCBASE=/opt/pgcloud
-ENV PGCLOG=/opt/pgcloud/log
+ENV PGCDATA=/opt/pgcloud
 
-# Copy new data
-COPY ./static/db/conf ./conf
-COPY ./static/db/script ./script
-COPY ./static/db/sys ./sys
+# Copy the data
+COPY ./static/db/ .
 
-# Create folder
-RUN mkdir log
+# Set the permissions
+RUN chmod +x ./sbin/*.sh
+RUN chmod +x ./script/*.sh
 
-# Make sure execution permissions
-RUN chmod +x ./sys/*.sh ./script/*.sh
+# Set read/write permissions to config files and all files
+RUN chmod 777 ./conf
 
+# Add the postgres user to sudoers
+RUN usermod -aG sudo postgres
+# Set no password for sudo to postgres user
+RUN echo "postgres  ALL=(ALL)   NOPASSWD: ALL" >> /etc/sudoers
 
-# Call entrypoint
-ENTRYPOINT ["./sys/entrypoint.sh"]
-
+# Own entrypoint
+ENTRYPOINT [ "./sbin/entrypoint.sh" ]
+CMD ["postgres"]
