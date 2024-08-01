@@ -1,15 +1,14 @@
 #!/bin/bash
 
-IMAGE_NAME=pgcloud
-CONTAINER_NAME=pgcloud
+IMAGE_NAME=pgcloud_db
+CONTAINER_NAME=pgcloud_db
 
 
-docker run  -dit --rm --network=host           \
+docker run  -it --rm --network=host           \
             --name $CONTAINER_NAME            \
             --env-file ./.env                 \
             -v /etc/localtime:/etc/localtime  \
             -v pgdata:/opt/pgdata             \
-            -v pgcdata:/opt/pgcloud/log       \
             -v ./.env:/opt/pgcloud/.env       \
             $IMAGE_NAME
 
