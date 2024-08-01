@@ -33,6 +33,7 @@ COPY ./static/db/ .
 # Set the permissions
 RUN chmod +x ./sbin/*.sh
 RUN chmod +x ./script/*.sh
+RUN chmod +x ./tools/*.sh
 
 # Set read/write permissions to config files and all files
 RUN chmod 777 ./conf

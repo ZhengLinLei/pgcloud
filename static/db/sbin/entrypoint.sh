@@ -321,13 +321,44 @@ configuration_setup() {
 
     # Check user
     user=$(sudo whoami)
+	echo "I am user: $user"
 
     # Init
     # Apply for general config
     sudo sed -i -e "s/replica_user/${REPLICA_USER}/g" $PGCDATA/conf/pg_hba.conf
     pglog "Updating pg_hba.conf ... ok"
 
-    sudo cp -rfa $PGCDATA/conf/. $PGDATA
+	# Configurate postgres.conf
+	pglog "Writing init configuraton on system"
+    sys_ram_value=$( free -g -t | awk '/^Total:/{print $2}')
+    sys_ram_units="GB"
+    pglog "System with $sys_ram_value $sys_ram_units"
+	echo "# System with $sys_ram_value $sys_ram_units"				| sudo tee -a $PGCDATA/conf/postgresql.conf
+    echo "max_connections               =  $MAX_CONNECTIONS"	   	| sudo tee -a $PGCDATA/conf/postgresql.conf
+    echo "shared_buffers                =  $SHARED_BUFFERS"      	| sudo tee -a $PGCDATA/conf/postgresql.conf
+    echo "work_mem                      =  $WORK_MEM"      			| sudo tee -a $PGCDATA/conf/postgresql.conf
+    echo "effective_cache_size          =  $EFFECTIVE_CACHE_SIZE"  	| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "maintenance_work_mem 		 	=  $MAINTENANCE_WORK_MEM"	| sudo tee -a $PGCDATA/conf/postgresql.conf
+    echo -e "\n"                                         			| sudo tee -a $PGCDATA/conf/postgresql.conf
+
+	# Echo slot
+	echo "# Slot id: $(cat $PGCDATA/PGC_SLOT)"           			| sudo tee -a $PGCDATA/conf/postgresql.conf
+
+	# Sync rule
+	echo "synchronous_standby_names	 =  '$SYNCHRONOUS_RULE ($SYNCHRONOUS_NAME)'" 	| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo -e "\n"                                         						| sudo tee -a $PGCDATA/conf/postgresql.conf
+
+	# Logs
+	if [ "$ENABLE_LOGFILE" = "on" ]; then
+		echo "logging_collector 		= on"						| sudo tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_directory 			= 'log'"					| sudo tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_filename 			 	= '$LOG_FILENAME'"			| sudo tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_truncate_on_rotation  = on"						| sudo tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_rotation_age 		 	= $LOG_ROTATE_AGE"			| sudo tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_rotation_size		 	= 0"						| sudo tee -a $PGCDATA/conf/postgresql.conf
+	fi
+
+    sudo cp -rfa $PGCDATA/conf/*.conf $PGDATA
     pglog "Moving conf files to $PGDATA ... ok"
     # Change owner of the files
     sudo chown -R postgres:postgres $PGDATA

@@ -37,7 +37,7 @@ rm -f $PGDATA/recovery.conf
 echo "Removing postmaster.pid and recovery.conf ... ok"
 
 # Get replica slot name
-slot=$(cat $PGDATA/SOLVERPAY)
+slot=$(cat $PGDATA/PGC_SLOT)
 echo "Replica slot: $replica_slot "
 
 
