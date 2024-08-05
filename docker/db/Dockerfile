@@ -35,6 +35,14 @@ RUN chmod +x ./sbin/*.sh
 RUN chmod +x ./script/*.sh
 RUN chmod +x ./tools/*.sh
 
+# Create link command -> bash script file
+# pgcloud_promote in /bin link to ./sbin/promote.sh
+RUN ln -s ./sbin/promote.sh /bin/pgcloud_promote
+# pgcloud_redirect
+RUN ln -s ./sbin/redirect.sh /bin/pgcloud_redirect
+# pgcloud_depromote
+RUN ln -s ./sbin/depromote.sh /bin/pgcloud_depromote
+
 # Set read/write permissions to config files and all files
 RUN chmod 777 ./conf
 
