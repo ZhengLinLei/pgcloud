@@ -220,6 +220,7 @@ docker_process_sql() {
 # create initial database
 # uses environment variables for input: POSTGRES_DB
 docker_setup_db() {
+	echo "Checking if database $POSTGRES_DB exists ..."
 	local dbAlreadyExists
 	dbAlreadyExists="$(
 		POSTGRES_DB= docker_process_sql --dbname postgres --set db="$POSTGRES_DB" --tuples-only <<-'EOSQL'
@@ -232,6 +233,7 @@ docker_setup_db() {
 		EOSQL
 		printf '\n'
 	fi
+	echo "Database $POSTGRES_DB exists ... ok"
 }
 
 # Loads various settings that are used elsewhere in the script
@@ -342,7 +344,7 @@ configuration_setup() {
     echo -e "\n"                                         			| sudo tee -a $PGCDATA/conf/postgresql.conf
 
 	# Echo slot
-	echo "# Slot id: $(cat $PGCDATA/PGC_SLOT)"           			| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "# Slot id: $(cat $PGCDATA/conf/PGC_SLOT)"           			| sudo tee -a $PGCDATA/conf/postgresql.conf
 
 	# Sync rule
 	echo "synchronous_standby_names	 =  '$SYNCHRONOUS_RULE ($SYNCHRONOUS_NAME)'" 	| sudo tee -a $PGCDATA/conf/postgresql.conf
@@ -358,6 +360,11 @@ configuration_setup() {
 		echo "log_rotation_size		 	= 0"						| sudo tee -a $PGCDATA/conf/postgresql.conf
 	fi
 
+	# Add port by our own way. Postgres already will set Port with $PGPORT env variable
+	echo -e "\n"                       		| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "port 	= $PGPORT"					| sudo tee -a $PGCDATA/conf/postgresql.conf
+
+	echo -e "\n\n"
     sudo cp -rfa $PGCDATA/conf/*.conf $PGDATA
     pglog "Moving conf files to $PGDATA ... ok"
     # Change owner of the files
@@ -425,7 +432,9 @@ _main() {
 			if [ "$NODE_ROLE" = "replica" ]; then
 				pglog "Replica node. Running pg_basebackup from primary node ..."
 				# pg_basebackup from primary node
-				yes ${REPLICA_PASS} | pg_basebackup -h ${PRIMARY_HOST} -p ${PRIMARY_PORT} -U ${REPLICA_USER} -d "host=${PRIMARY_HOST} port=${PRIMARY_PORT} user=${REPLICA_USER} dbname=${POSTGRES_DB} application_name=${BACKEND_NAME}" -X stream -C -S pgcloud$slot -v -R -w -D ${PGDATA} || {
+				export PGPASSWORD=$REPLICA_PASS
+				pg_basebackup -h ${PRIMARY_HOST} -p ${PRIMARY_PORT} -U ${REPLICA_USER} -d "host=${PRIMARY_HOST} port=${PRIMARY_PORT} user=${REPLICA_USER} dbname=${POSTGRES_DB} application_name=${BACKEND_NAME}" -X stream -C -S pgcloud$slot -v -R -w -D ${PGDATA} || {
+					echo "Backup failed ... exiting"
 					exit 1
 				}
                 pglog ""
@@ -450,11 +459,6 @@ _main() {
 
 				pglog "pg_hba.conf created ... ok"
 
-                # Configuration setup
-                configuration_setup
-
-				pglog "Custom scripts executed ... ok"
-
 				# PGPASSWORD is required for psql when authentication is required for 'local' connections via pg_hba.conf and is otherwise harmless
 				# e.g. when '--auth=md5' or '--auth-local=md5' is used in POSTGRES_INITDB_ARGS
 				export PGPASSWORD="${PGPASSWORD:-$POSTGRES_PASSWORD}"
@@ -468,12 +472,19 @@ _main() {
                 # Replication setup
                 replication_setup
 
+				echo "Replication user setup $REPLICA_USER ... ok"
+
 				docker_process_init_files /docker-entrypoint-initdb.d/*
 
 				pglog "Executing user init script ... ok"
 
 				docker_temp_server_stop
 				pglog "Server stopped ... ok"
+
+				# Configuration setup
+                configuration_setup
+
+				pglog "Custom scripts executed ... ok"
 
 				pglog ""
 				pglog "Postgres database ready to use"
@@ -500,6 +511,7 @@ _main() {
 
 	pglog "Starting postgres"
     pglog "------------------------------------------------------"
+	echo "Starting postgres"
 	exec "$@"
 }
 
