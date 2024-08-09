@@ -113,8 +113,8 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
     FAILOVER_PROMOTE_CMD=${FAILOVER_PROMOTE_CMD//%r/$OLD_PRIMARY_NODE_PORT}
 
     pglog "Execute: ${FAILOVER_PROMOTE_CMD}"
-    pglog "ssh -o StrictHostKeyChecking=no ${SSH_USER1}@${NEW_MASTER_NODE_HOST} -p ${SSH_PORT1} exit"
-    pglog "ssh ${SSH_USER1}@${NEW_MASTER_NODE_HOST} -p ${SSH_PORT1} \"${FAILOVER_PROMOTE_CMD}\""
+    pglog "     ssh -o StrictHostKeyChecking=no ${SSH_USER1}@${NEW_MASTER_NODE_HOST} -p ${SSH_PORT1} exit"
+    pglog "     ssh ${SSH_USER1}@${NEW_MASTER_NODE_HOST} -p ${SSH_PORT1} \"${FAILOVER_PROMOTE_CMD}\""
     pglog ""
     pglog ""
     pglog "_________________ Remote server logs ____________________"
@@ -132,7 +132,6 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
         pglog "Time used: $exe_time s"
         exit 1
     }
-    pglog "_________________________________________________________"
     pglog ""
     pglog ""
 
@@ -148,101 +147,49 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
     pglog "Execute: ${FAILOVER_REDIRECT_CMD}"
 
     # Get all nodes
-    if [ "$PSQL_SERVER_USE_FILE" = "on" ]; then
-        pglog "Server file configuration activated. Using configuration in $SERVER_CONF_PATH"
+    pglog "Reading all servers configuration files"
 
-        # Reading all files starting from server*.env
-        file_count=$(ls -1 $SERVER_CONF_PATH | grep -E 'server[0-9]+\.env' | wc -l)
-        pglog "$file_count servers configuration file found"
+    # Reading all files starting from server*.env
+    file_count=$(ls -1 $SERVER_CONF_PATH | grep -E 'server[0-9]+\.env' | wc -l)
+    pglog "$file_count servers configuration file found"
 
-        # Iterate from server config files
-        set -a
-        for i in $(seq 0 $((file_count - 1))); do
-            if [ "$i" = "$OLD_PRIMARY_NODE_ID" ] || [ "$i" = "$NEW_MASTER_NODE_ID" ]; then
-                continue
-            fi
-            pglog "---------------"
-            # Config servers
-            server_file="$SERVER_CONF_PATH/server$i.env"
-            pglog "Server $server_file"
+    # Iterate from server config files
+    set -a
+    for i in $(seq 0 $((file_count - 1))); do
+        if [ "$i" = "$OLD_PRIMARY_NODE_ID" ] || [ "$i" = "$NEW_MASTER_NODE_ID" ]; then
+            continue
+        fi
+        # Config servers
+        server_file="$SERVER_CONF_PATH/server$i.env"
+        pglog "Redirecting server $server_file to new primary"
 
-            # Source and update data
-            source $server_file || {
-                pglog "Cannot load configuration, please check the logs and fix the error"
-                pglog "Server id: $i failed configurating new primary connection"
-            }
-            # ---
+        # Source and update data
+        source $server_file || {
+            pglog "Cannot load configuration, please check the logs and fix the error"
+            pglog "Server id: $i failed configurating new primary connection"
+        }
+        # ---
 
-            pglog "ssh -o StrictHostKeyChecking=no ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} exit"
-            pglog "ssh ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} \"${FAILOVER_REDIRECT_CMD}\""
-            pglog ""
-            pglog ""
-            pglog "_________________ Remote server logs ____________________"
-            sshpass -p "${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} exit  >> $SCRIPT_LOG 2>&1 || {
-                pglog ">> Login ssh to machine failed..."
-                pglog "<< Server could be down or configuration not set correctly. SERVER REDIRECT FAILED"
-            }
-            # redirect
-            sshpass -p "${SSH_PASS}" ssh ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} "${FAILOVER_REDIRECT_CMD}" >> $SCRIPT_LOG 2>&1 || {
-                pglog ">> Executing ssh to machine failed..."
-                pglog "<< Avoiding redirect for this server $PSQL_HOST"
-            }
-            pglog "_________________________________________________________"
-            pglog ""
-            pglog ""
-        done
-        set +a
-        echo "---------------"
-    else
-        echo "Server env configuration. Retrieving configuration from variables"
+        pglog "     ssh -o StrictHostKeyChecking=no ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} exit"
+        pglog "     ssh ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} \"${FAILOVER_REDIRECT_CMD}\""
+        pglog ""
+        pglog ""
+        pglog "_________________ Remote server logs ____________________"
+        sshpass -p "${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} exit  >> $SCRIPT_LOG 2>&1 || {
+            pglog ">> Login ssh to machine failed..."
+            pglog "<< Server could be down or configuration not set correctly. SERVER REDIRECT FAILED"
+        }
+        # redirect
+        sshpass -p "${SSH_PASS}" ssh ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} "${FAILOVER_REDIRECT_CMD}" >> $SCRIPT_LOG 2>&1 || {
+            pglog ">> Executing ssh to machine failed..."
+            pglog "<< Avoiding redirect for this server $PSQL_HOST"
+        }
+        pglog "_________________________________________________________"
+        pglog ""
+        pglog ""
+    done
+    set +a
 
-        IFS=', ' read -r -a PSQL_HOSTS    <<< "$PSQL_HOSTS"
-        IFS=', ' read -r -a PSQL_PORTS    <<< "$PSQL_PORTS"
-        IFS=', ' read -r -a PSQL_WEIGHTS  <<< "$PSQL_WEIGHTS"
-        IFS=', ' read -r -a PSQL_FAILS    <<< "$PSQL_FAILS"
-        IFS=', ' read -r -a PSQL_PATHS    <<< "$PSQL_PATHS"
-        IFS=', ' read -r -a PSQL_ACTIVES  <<< "$PSQL_ACTIVES"
-        IFS=', ' read -r -a SSH_USERS     <<< "$SSH_USERS"
-        IFS=', ' read -r -a SSH_PASSW     <<< "$SSH_PASSW"
-
-        array_len=${#PSQL_HOSTS[@]}
-        echo "$array_len servers configuration variables found"
-
-        for (( i=0; i<array_len; i++ )); do
-            if [ "$i" = "$OLD_PRIMARY_NODE_ID" ] || [ "$i" = "$NEW_MASTER_NODE_ID" ]; then
-                continue
-            fi
-            echo "---------------"
-            echo "Server $i"
-            # ---
-            PSQL_HOST=${PSQL_HOSTS[i]}
-            PSQL_PORT=${PSQL_PORTS[i]}
-            PSQL_WEIGHT=${PSQL_WEIGHTS[i]}
-            PSQL_FAIL=${PSQL_FAILS[i]}
-            PSQL_PATH=${PSQL_PATHS[i]}
-            PSQL_ACTIVE=${PSQL_ACTIVES[i]}
-
-            pglog "ssh -o StrictHostKeyChecking=no ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} exit"
-            pglog "ssh ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} \"${FAILOVER_REDIRECT_CMD}\""
-            pglog ""
-            pglog ""
-            pglog "_________________ Remote server logs ____________________"
-            sshpass -p "${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} exit  >> $SCRIPT_LOG 2>&1 || {
-                pglog ">> Login ssh to machine failed..."
-                pglog "<< Server could be down or configuration not set correctly. SERVER REDIRECT FAILED"
-            }
-            # redirect
-            sshpass -p "${SSH_PASS}" ssh ${SSH_USER}@${PSQL_HOST} -p ${SSH_PORT} "${FAILOVER_REDIRECT_CMD}" >> $SCRIPT_LOG 2>&1 || {
-                pglog ">> Executing ssh to machine failed..."
-                pglog "<< Avoiding redirect for this server $PSQL_HOST"
-            }
-            pglog "_________________________________________________________"
-            pglog ""
-            pglog ""
-        done
-        echo "---------------"
-
-    fi
 
     pglog "============================================================ DEPROMOTING OLD PRIMARY"
     pglog "Forcing died primary to become replica, and update it."
@@ -268,14 +215,14 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
         pglog ""
         pglog "Connection stablished, trying to recover the old primary node"
         pglog "Execute: ${FAILOVER_RECOVERY_PRIMARY_CMD}"
-        pglog "ssh ${SSH_USER0}@${OLD_PRIMARY_NODE_HOST} -p ${SSH_PORT0} \"${FAILOVER_RECOVERY_PRIMARY_CMD}\"" 
+        pglog "     ssh ${SSH_USER0}@${OLD_PRIMARY_NODE_HOST} -p ${SSH_PORT0} \"${FAILOVER_RECOVERY_PRIMARY_CMD}\"" 
         pglog ""
         pglog ""
         pglog "_________________ Remote server logs ____________________"
         sshpass -p "${SSH_PASS0}" ssh ${SSH_USER0}@${OLD_PRIMARY_NODE_HOST} -p ${SSH_PORT0} "${FAILOVER_RECOVERY_PRIMARY_CMD}" >> $SCRIPT_LOG 2>&1 && {
             pglog "Node recovered succesfully, depromoting old primary and restart with replica configuration"
             pglog "Execute: ${FAILOVER_DEPROMOTE_CMD}"
-            pglog "ssh ${SSH_USER0}@${OLD_PRIMARY_NODE_HOST} -p ${SSH_PORT0} \"${FAILOVER_DEPROMOTE_CMD}\""
+            pglog "     ssh ${SSH_USER0}@${OLD_PRIMARY_NODE_HOST} -p ${SSH_PORT0} \"${FAILOVER_DEPROMOTE_CMD}\""
             sshpass -p "${SSH_PASS0}" ssh ${SSH_USER0}@${OLD_PRIMARY_NODE_HOST} -p ${SSH_PORT0} "${FAILOVER_DEPROMOTE_CMD}" >> $SCRIPT_LOG 2>&1 && {
                 pglog "Node recovered succesfully as replica, continue with normal execution"
                 pglog "Attaching the node $FAILED_NODE_ID back to up and allow to receive request"
@@ -297,11 +244,15 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
         pglog "<< Stop trying to recover old primary [Aborting]  MANUAL RECOVERY MUST NEEDED"
     }
 
-
-    # Changing lb_wight to prevent execute select in primary and set old primary as replica
-    # backend_weight2\s*=\s*\d
-    sed -i "s/^backend_weight$NEW_MASTER_NODE_ID\s*=\s*\d/backend_weight$NEW_MASTER_NODE_ID          =  0/" $BASE_PATH/conf/pgpool.conf
-    sed -i "s/^backend_weight$OLD_PRIMARY_NODE_ID\s*=\s*\d/backend_weight$OLD_PRIMARY_NODE_ID          =  1/" $BASE_PATH/conf/pgpool.conf
+    # Call recovery config extra script
+    # Check if exist env var
+    if [ -z "$FAILOVER_RECOVERY_CONFIG_SCRIPT" ]; then
+        pglog "No extra script to execute"
+    else
+        pglog "Execute: $FAILOVER_RECOVERY_CONFIG_SCRIPT"
+        # Execute the script
+        $FAILOVER_RECOVERY_CONFIG_SCRIPT >> $SCRIPT_LOG 2>&1
+    fi
 
     # Move to config path
     cp -rf $BASE_PATH/conf/pgpool.conf $PGPOOL_CONF_FILE
