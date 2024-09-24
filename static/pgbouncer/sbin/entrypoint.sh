@@ -1,6 +1,7 @@
 #!/bin/bash
 
-PGPOOL_CONF_PATH=/etc/pgbouncer
+PGB_CONF_PATH=/etc/pgbouncer
+PGB_LOCK_FILE=lock.pgcloud
 CONF_BASE_PATH=$PGCDATA/conf
 
 pglog () {
@@ -10,8 +11,7 @@ pglog () {
 
 # Generate configuration
 pglog "------------ Starting pgbouncer ------------"
-pglog "  Server: $PGPOOL_PORT"
-pglog "  PCP: $PCP_PORT"
+pglog "  Server: $PGB_PORT"
 pglog "  User: $POSTGRES_USER"
 pglog "  Database: $POSTGRES_DB"
 pglog "--------------------------------------------"
@@ -20,9 +20,9 @@ pglog "            When recreating the container, the configuration will be rese
 pglog "            To avoid this, mount the configuration file to the container."
 
 # Check if configuration exists
-if [ -f $PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE ]; then
+if [ -f $PGB_CONF_PATH/$PGB_LOCK_FILE ]; then
     pglog "Directory appears to contain a previous configuration; Skipping initialization of config files"
-    pglog "To reset the configuration, remove the lock file `$PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE` and restart the container"
+    pglog "To reset the configuration, remove the lock file `$PGB_CONF_PATH/$PGB_LOCK_FILE` and restart the container"
     pglog "If any error occurs, please check the logs and fix the error manually or remove the lock file and let system to write the configuration"
 else
     pglog "Initializing pgpool configuration files"
@@ -30,7 +30,7 @@ else
     pglog "----- Generating Database conf ------"
 
     pglog "[database]"
-    echo "[database]"           >> $PGPOOL_CONF_PATH/pgbouncer.ini
+    echo "[database]"           >> $CONF_BASE_PATH/pgbouncer.ini
 
     # Check if exist the configuration file
     # $CONF_BASE_PATH/backend.env
@@ -38,7 +38,7 @@ else
         source $CONF_BASE_PATH/backend.env
 
         pglog "$BACKEND_DB = \\"
-        echo -e "$BACKEND_DB = \\\n"    >> $PGPOOL_CONF_PATH/pgbouncer.ini
+        echo -e "$BACKEND_DB = \\\n"    >> $CONF_BASE_PATH/pgbouncer.ini
 
         BACKEND_NUM=$(( BACKEND_NUM - 1 ))
         for i in {0 .. $BACKEND_NUM}; do
@@ -59,11 +59,11 @@ else
             fi
 
             pglog "host=$BACKEND_HOST$i port=$BACKEND_PORT$i dbname=$BACKEND_DB$i user=$POSTGRES_USER $end"
-            echo -e "host=$BACKEND_HOST$i port=$BACKEND_PORT$i dbname=$BACKEND_DB$i user=$POSTGRES_USER $end" >> $PGPOOL_CONF_PATH/pgbouncer.ini
+            echo -e "host=$BACKEND_HOST$i port=$BACKEND_PORT$i dbname=$BACKEND_DB$i user=$POSTGRES_USER $end" >> $CONF_BASE_PATH/pgbouncer.ini
         done
     else
         pglog "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB"
-        echo "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB" >> $PGPOOL_CONF_PATH/pgbouncer.ini
+        echo "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB" >> $CONF_BASE_PATH/pgbouncer.ini
     fi
 
     pglog "----- Generating Common conf ------"
@@ -73,14 +73,50 @@ else
     pglog "listen_addr = *"
     pglog "listen_port = $PGB_PORT"
     pglog "auth_type   = $PCB_AUTH"
-    pglog "auth_file   = $PGPOOL_CONF_PATH/auth_file.cfg"
+    pglog "auth_file   = $PGB_CONF_PATH/auth_file.cfg"
 
-    echo "[pgbouncer]"                                   >> $PGPOOL_CONF_PATH/pgbouncer.ini
-    echo "listen_addr = *"                               >> $PGPOOL_CONF_PATH/pgbouncer.ini
-    echo "listen_port = $PGB_PORT"                       >> $PGPOOL_CONF_PATH/pgbouncer.ini
-    echo "auth_type   = $PCB_AUTH"                       >> $PGPOOL_CONF_PATH/pgbouncer.ini
-    echo "auth_file   = $PGPOOL_CONF_PATH/auth_file.cfg" >> $PGPOOL_CONF_PATH/pgbouncer.ini
+    echo "[pgbouncer]"                                   >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "listen_addr = *"                               >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "listen_port = $PGB_PORT"                       >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "auth_type   = $PCB_AUTH"                       >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "auth_file   = $PGB_CONF_PATH/auth_file.cfg"    >> $CONF_BASE_PATH/pgbouncer.ini
 
-    # pglog "----- Generating Auth conf ------"
+    pglog "----- Generating Limits conf ------"
 
+    pglog "pool_mode = $POOL_MODE"
+    pglog "max_client_conn = $MAX_CLIENT_CONN"
+    pglog "default_pool_size = $DEFAULT_POOL_SIZE"
+
+    echo "pool_mode = $POOL_MODE"                       >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "max_client_conn = $MAX_CLIENT_CONN"           >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "default_pool_size = $DEFAULT_POOL_SIZE"       >> $CONF_BASE_PATH/pgbouncer.ini
+
+    # Create auth_file
+    pglog "----- Generating auth_file ------"
+    pglog " User: $POSTGRES_USER"
+    pglog " Pass: $POSTGRES_PASSWORD"
+    > $CONF_BASE_PATH/auth_file.cfg
+    MD5_PASS="md5$(echo -n "$POSTGRES_PASSWORD""$POSTGRES_USER" | md5sum | awk '{print $1}')"
+    echo "$POSTGRES_USER $MD5_PASS" >> $CONF_BASE_PATH/auth_file.cfg
+
+
+    # Move to config path
+    cp -rfa $CONF_BASE_PATH/. $PGB_CONF_PATH
+
+fi
+
+pglog "-----------------------------"
+pglog "> Starting pgbouncer"
+pglog "> Listening on port $PGB_PORT"
+
+
+# Run pgbouncer
+if [ "$ENABLE_LOGFILE" = "on" ]; then
+    # Run pgbouncer to cronolog and output to file
+    pgbouncer $PGB_CONF_PATH/pgbouncer.ini 2>&1 | cronolog    \
+        --hardlink=$PGCDATA/$LOG_NAME   \
+        "$PGCDATA/$LOG_FILENAME"
+else
+    # Run pgbouncer to stdout and stderr
+    pgbouncer $PGB_CONF_PATH/pgbouncer.ini
 fi
