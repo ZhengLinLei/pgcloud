@@ -27,6 +27,8 @@ COPY ./docker/pgpool/conf/pgpool ./conf/pgpool
 COPY ./docker/pgpool/conf/postgres ./conf/postgres
 COPY ./docker/pgpool/conf/pgbouncer ./conf/pgbouncer
 
+RUN mkdir -p ./log
+
 # Set the permissions
 RUN chmod +x ./sbin/*.sh
 RUN chmod +x ./script/*.sh
