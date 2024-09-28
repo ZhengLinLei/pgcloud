@@ -51,6 +51,10 @@ RUN usermod -aG sudo postgres
 # Set no password for sudo to postgres user
 RUN echo "postgres  ALL=(ALL)   NOPASSWD: ALL" >> /etc/sudoers
 
+# Set log folder to postgresql user
+RUN mkdir -p ./log
+RUN chown -R postgres:postgres ./log
+
 # Own entrypoint
 ENTRYPOINT [ "./sbin/entrypoint.sh" ]
 
