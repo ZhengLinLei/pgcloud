@@ -29,46 +29,62 @@ else
     
     pglog "----- Generating Database conf ------"
 
-    pglog "[database]"
-    echo "[database]"           >> $CONF_BASE_PATH/pgbouncer.ini
+    pglog "[databases]"
+    echo -e "\n"                >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "[databases]"           >> $CONF_BASE_PATH/pgbouncer.ini
 
     # Check if exist the configuration file
     # $CONF_BASE_PATH/backend.env
-    if [ -f "$CONF_BASE_PATH/backend.env" ]; then
-        source $CONF_BASE_PATH/backend.env
+    if [ -f "$CONF_BASE_PATH/server/backend.env" ]; then
+        pglog "----- Using backend.env ------"
+        source $CONF_BASE_PATH/server/backend.env
 
-        pglog "$BACKEND_DB = \\"
-        echo -e "$BACKEND_DB = \\\n"    >> $CONF_BASE_PATH/pgbouncer.ini
+        if [ -z "$RW_BACKEND_NUM" ]; then
+            pglog "ERROR: RW_BACKEND_NUM is not set"
+            exit 1
+        fi
+        if [ -z "$RO_BACKEND_NUM" ]; then
+            pglog "ERROR: RO_BACKEND_NUM is not set"
+            exit 1
+        fi
 
-        BACKEND_NUM=$(( BACKEND_NUM - 1 ))
-        for i in {0 .. $BACKEND_NUM}; do
-            if [ -z $BACKEND_HOST$i ]; then
-                pglog "Error: BACKEND_HOST$i is not set"
+        # Check if set RW
+        if [ "$RW_BACKEND_NUM" -gt 0 ]; then
+            if [ -z "$RW_BACKEND_HOST" ]; then
+                pglog "ERROR: RW_BACKEND_HOST is not set"
+                exit 1
+            fi
+            if [ -z "$RW_BACKEND_PORT" ]; then
+                pglog "ERROR: RW_BACKEND_PORT is not set"
                 exit 1
             fi
 
-            if [ -z $BACKEND_PORT$i ]; then
-                pglog "Error: BACKEND_PORT$i is not set"
+            pglog "$POSTGRES_DB = host=$RW_BACKEND_HOST port=$RW_BACKEND_PORT dbname=$POSTGRES_DB"
+            echo "$POSTGRES_DB = host=$RW_BACKEND_HOST port=$RW_BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
+        fi
+
+        # Check if set RO
+        if [ "$RO_BACKEND_NUM" -gt 0 ]; then
+            if [ -z "$RO_BACKEND_HOST$" ]; then
+                pglog "ERROR: RO_BACKEND_HOST is not set"
+                exit 1
+            fi
+            if [ -z "$RO_BACKEND_PORT" ]; then
+                pglog "ERROR: RO_BACKEND_PORT is not set"
                 exit 1
             fi
 
-            if [ "$BACKEND_NUM" == "$i" ]; then
-                end=" \n"
-            else
-                end=" \\\n"
-            fi
-
-            pglog "host=$BACKEND_HOST$i port=$BACKEND_PORT$i dbname=$BACKEND_DB$i user=$POSTGRES_USER $end"
-            echo -e "host=$BACKEND_HOST$i port=$BACKEND_PORT$i dbname=$BACKEND_DB$i user=$POSTGRES_USER $end" >> $CONF_BASE_PATH/pgbouncer.ini
-        done
+            pglog "$RO_POSTGRES_DB = host=$RO_BACKEND_HOST port=$RW_BACKEND_PORT dbname=$POSTGRES_DB"
+            echo "$RO_POSTGRES_DB = host=$RO_BACKEND_PORT port=$RW_BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
+        fi
     else
+        pglog "----- Using environment variables ------"
         pglog "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB"
-        echo "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB" >> $CONF_BASE_PATH/pgbouncer.ini
+        echo "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
     fi
 
     pglog "----- Generating Common conf ------"
 
-    pglog "[pgbouncer]"
     pglog "[pgbouncer]"
     pglog "listen_addr = *"
     pglog "listen_port = $PGB_PORT"
@@ -78,17 +94,17 @@ else
     echo "[pgbouncer]"                                   >> $CONF_BASE_PATH/pgbouncer.ini
     echo "listen_addr = *"                               >> $CONF_BASE_PATH/pgbouncer.ini
     echo "listen_port = $PGB_PORT"                       >> $CONF_BASE_PATH/pgbouncer.ini
-    echo "auth_type   = $PCB_AUTH"                       >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "auth_type   = $PGB_AUTH"                       >> $CONF_BASE_PATH/pgbouncer.ini
     echo "auth_file   = $PGB_CONF_PATH/auth_file.cfg"    >> $CONF_BASE_PATH/pgbouncer.ini
 
     pglog "----- Generating Limits conf ------"
 
     pglog "pool_mode = $POOL_MODE"
-    pglog "max_client_conn = $MAX_CLIENT_CONN"
+    pglog "max_client_conn = $MAX_CONNECTIONS"
     pglog "default_pool_size = $DEFAULT_POOL_SIZE"
 
     echo "pool_mode = $POOL_MODE"                       >> $CONF_BASE_PATH/pgbouncer.ini
-    echo "max_client_conn = $MAX_CLIENT_CONN"           >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "max_client_conn = $MAX_CONNECTIONS"           >> $CONF_BASE_PATH/pgbouncer.ini
     echo "default_pool_size = $DEFAULT_POOL_SIZE"       >> $CONF_BASE_PATH/pgbouncer.ini
 
     # Create auth_file
@@ -96,8 +112,37 @@ else
     pglog " User: $POSTGRES_USER"
     pglog " Pass: $POSTGRES_PASSWORD"
     > $CONF_BASE_PATH/auth_file.cfg
-    MD5_PASS="md5$(echo -n "$POSTGRES_PASSWORD""$POSTGRES_USER" | md5sum | awk '{print $1}')"
-    echo "$POSTGRES_USER $MD5_PASS" >> $CONF_BASE_PATH/auth_file.cfg
+
+    # Create password for Postgres
+    export PGPASSWORD=$POSTGRES_PASSWORD
+    ENCRYPTED_PASS=$(psql -At -h $BACKEND_HOST -p $BACKEND_PORT -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT rolpassword FROM pg_authid WHERE rolname='$POSTGRES_USER';")
+    
+    # If error exit with error and log
+    if [ $? -ne 0 ]; then
+        # Print to stderror
+        echo "ERROR: Please check logs. Could not connect to the database" 1>&2
+        pglog "ERROR: Please check logs. Could not connect to the database"
+        exit 1
+    fi
+
+    pglog "Backend password: $ENCRYPTED_PASS"
+    if [ "$PGB_AUTH" == "md5" ]; then
+        # Check if password is already encrypted in md5
+        if [[ $ENCRYPTED_PASS == "md5"* ]]; then
+            pglog "Password is already encrypted in md5"
+        else
+            pglog "WARNING: Backend password is not encrypted in md5, this may cause authentication errors"
+        fi
+        ENCRYPTED_PASS="md5$(echo -n "$POSTGRES_PASSWORD""$POSTGRES_USER" | md5sum | awk '{print $1}')"
+    elif [ "$PGB_AUTH" == "scram-sha-256" ]; then
+        # Check if password is already encrypted in scram-sha-256
+        if [[ $ENCRYPTED_PASS == "SCRAM-SHA-256"* ]]; then
+            pglog "Password is already encrypted in SCRAM-SHA-256"
+        else
+            pglog "WARNING: Backend password is not encrypted in SCRAM-SHA-256, this may cause authentication errors"
+        fi
+    fi
+    echo "\"$POSTGRES_USER\" \"$ENCRYPTED_PASS\"" >> $CONF_BASE_PATH/auth_file.cfg
 
 
     # Move to config path
@@ -108,15 +153,16 @@ fi
 pglog "-----------------------------"
 pglog "> Starting pgbouncer"
 pglog "> Listening on port $PGB_PORT"
+pglog "> Ini file: $PGB_CONF_PATH/pgbouncer.ini"
 
 
 # Run pgbouncer
 if [ "$ENABLE_LOGFILE" = "on" ]; then
     # Run pgbouncer to cronolog and output to file
-    pgbouncer $PGB_CONF_PATH/pgbouncer.ini 2>&1 | cronolog    \
+    pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini 2>&1 | cronolog    \
         --hardlink=$PGCDATA/$LOG_NAME   \
         "$PGCDATA/$LOG_FILENAME"
 else
     # Run pgbouncer to stdout and stderr
-    pgbouncer $PGB_CONF_PATH/pgbouncer.ini
+    pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini
 fi
