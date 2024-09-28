@@ -353,7 +353,10 @@ configuration_setup() {
 	# Logs
 	if [ "$ENABLE_LOGFILE" = "on" ]; then
 		echo "logging_collector 		= on"						| sudo tee -a $PGCDATA/conf/postgresql.conf
-		echo "log_directory 			= 'log'"					| sudo tee -a $PGCDATA/conf/postgresql.conf
+		# Log directory on PGCLOUD instead of PGDATA
+		# When setting log_directory to PGDATA directory it will be copied by all replicas
+		# This is not the desired behavior. And to avoid this, we will set the log directory to PGCLOUD
+		echo "log_directory 			= '$PGCDATA/log'"			| sudo tee -a $PGCDATA/conf/postgresql.conf
 		echo "log_filename 			 	= '$LOG_FILENAME'"			| sudo tee -a $PGCDATA/conf/postgresql.conf
 		echo "log_truncate_on_rotation  = on"						| sudo tee -a $PGCDATA/conf/postgresql.conf
 		echo "log_rotation_age 		 	= $LOG_ROTATE_AGE"			| sudo tee -a $PGCDATA/conf/postgresql.conf
@@ -362,7 +365,13 @@ configuration_setup() {
 
 	# Add port by our own way. Postgres already will set Port with $PGPORT env variable
 	echo -e "\n"                       		| sudo tee -a $PGCDATA/conf/postgresql.conf
-	echo "port 	= $PGPORT"					| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "port = $PGPORT"					| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo -e "\n"                       		| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "password_encryption = $POSTGRES_HOST_AUTH_METHOD" | sudo tee -a $PGCDATA/conf/postgresql.conf
+
+	pglog "Configurating postgres.conf ... ok"
+
+	# Copy conf files to $PGDATA
 
 	echo -e "\n\n"
     sudo cp -rfa $PGCDATA/conf/*.conf $PGDATA
@@ -437,7 +446,12 @@ _main() {
 					echo "Backup failed ... exiting"
 					exit 1
 				}
-                pglog ""
+
+				# Update port in postgresql.conf with $PGPORT
+				# Port could be any value, so we need to update the port in postgresql.conf
+				sudo sed -i -E "s/(port =).*/\1 $PGPORT/g" $PGDATA/postgresql.conf				
+                
+				pglog ""
 				pglog "     [ok] pg_basebackup from primary node"
                 pglog ""
 				cat <<-'EOM'
