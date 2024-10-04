@@ -2,7 +2,7 @@
 <h5 align="center" style="font-family: monospace;">Oroneta</h5>
 <br>
 <p align="center">
-    <img src="doc/img/pgcloud_small_logo_bgWhite.png" width="80px">
+    <img src="doc/img/pgcloud_small_logo_bgWhite_rounded.png" width="80px">
 </p>
 <br><br>
 
