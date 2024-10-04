@@ -96,6 +96,7 @@ else
     echo "listen_port = $PGB_PORT"                       >> $CONF_BASE_PATH/pgbouncer.ini
     echo "auth_type   = $PGB_AUTH"                       >> $CONF_BASE_PATH/pgbouncer.ini
     echo "auth_file   = $PGB_CONF_PATH/auth_file.cfg"    >> $CONF_BASE_PATH/pgbouncer.ini
+    echo "stats_users = $POSTGRES_USER"                  >> $CONF_BASE_PATH/pgbouncer.ini
 
     pglog "----- Generating Limits conf ------"
 
@@ -160,8 +161,8 @@ pglog "> Ini file: $PGB_CONF_PATH/pgbouncer.ini"
 if [ "$ENABLE_LOGFILE" = "on" ]; then
     # Run pgbouncer to cronolog and output to file
     pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini 2>&1 | cronolog    \
-        --hardlink=$PGCDATA/$LOG_NAME   \
-        "$PGCDATA/$LOG_FILENAME"
+        --hardlink="$PGCDATA/log/$LOG_NAME"   \
+        "$PGCDATA/log/$LOG_FILENAME"
 else
     # Run pgbouncer to stdout and stderr
     pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini
