@@ -88,7 +88,7 @@ By default the system is enabled to launch this architecture.
 </p>
 <br>
 
-### Three-tier diagram
+### Two-tier diagram
 <br>
 <p align="center">
     <img src="doc/readme/3_three_layer_diagram.png" width="45%">
@@ -107,7 +107,7 @@ By default the system is enabled to launch this architecture.
 </p>
 <br>
 
-### Two-tier diagram
+### Three-tier diagram
 <br>
 <p align="center">
     <img src="doc/readme/5_two_layer_diagram.png" width="500px">
