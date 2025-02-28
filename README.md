@@ -1,5 +1,5 @@
 <br><br>
-<h5 align="center" style="font-family: monospace;">Oroneta</h5>
+<h5 align="center" style="font-family: monospace;">PgCloud</h5>
 <br>
 <p align="center">
     <img src="doc/img/pgcloud_small_logo_bgWhite_rounded.png" width="80px">
