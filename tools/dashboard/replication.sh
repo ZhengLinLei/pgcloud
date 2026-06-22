@@ -214,40 +214,37 @@ diagnose_replication_lag() {
                     echo -e "   ${WHITE}│${NC} ${RED}✗ Replication Stream Inactive (state: ${state})${NC}"
                 fi
                 
-                local repl_slots=$(execute_query "$host" "$port" "
-                    SELECT
-                        slot_name,
-                        active,
-                        ROUND(
-                            COALESCE(
-                                pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) / 1024.0 / 1024.0,
-                                0
-                            ),
-                            1
-                        ) as wal_mb
-                    FROM pg_replication_slots
-                    WHERE slot_name LIKE '%$app_name%';
-                " 2>/dev/null)
-                
-                if [ -n "$repl_slots" ]; then
-                    echo "$repl_slots" | while IFS='|' read -r slot_name active wal_mb; do
-                        if [ -n "$slot_name" ]; then
-                            local slot_status="$GREEN"
-                            if [ "$active" == "f" ]; then
-                                slot_status="$RED"
-                            fi
-                            echo -e "   ${WHITE}│${NC} ${WHITE}Replication Slot:${NC} ${slot_name} (${slot_status}${active}${NC}) WAL: ${wal_mb}MB"
-                            
-                            if [ "$active" == "f" ] && [ -n "$wal_mb" ] && (( $(echo "$wal_mb > 1024" | bc -l) )); then
-                                echo -e "   ${WHITE}│${NC} ${RED}⚠ Inactive slot with ${wal_mb}MB WAL - Consider dropping${NC}"
-                            fi
-                        fi
-                    done
-                fi
                 
                 echo -e "   ${WHITE}└──────────────────────────────────────────────────────────────────────────┘${NC}"
                 echo -e "${WHITE}└────────────────────────────────────────────────────────────────────────────────┘${NC}"
                 echo ""
+
+                echo -e "${WHITE}──────────────────────────────────────────────────────────────────────────────────${NC}"
+                echo ""
+                # slots
+                echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${WHITE}║ ${BLUE}REPLICATION SLOT INFORMATION${WHITE}                                                     ║${NC}"
+                echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════════════════════╝${NC}"
+                local slots_info=$(execute_query "$host" "$port" "
+                    SELECT slot_name, plugin, slot_type, active, restart_lsn, confirmed_flush_lsn
+                    FROM pg_replication_slots;
+                " 2>/dev/null)
+                if [ -n "$slots_info" ]; then
+                    echo "$slots_info" | while IFS='|' read -r slot_name plugin slot_type active restart_lsn confirmed_flush_lsn; do
+                        if [ -n "$slot_name" ]; then
+                            echo -e "${WHITE}┌────────────────────────────────────────────────────────────────────────────┐${NC}"
+                            echo -e "${WHITE}│ ${GREEN}Slot: ${slot_name}${NC} (${slot_type})"
+                            echo -e "${WHITE}│${NC}"
+                            echo -e "   ${WHITE}Active:${NC} ${active}  ${WHITE}Restart LSN:${NC} ${restart_lsn}  ${WHITE}Confirmed Flush LSN:${NC} ${confirmed_flush_lsn}"
+                            echo -e "${WHITE}└────────────────────────────────────────────────────────────────────────────┘${NC}"
+                            echo ""
+                        fi
+                    done
+                else
+                    echo -e "${YELLOW}No replication slots found${NC}"
+                    echo ""
+                fi
+
             fi
         done
     else

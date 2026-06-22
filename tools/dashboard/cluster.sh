@@ -211,14 +211,31 @@ print_node_status_horizontal() {
     fi
     
     local long_queries=$(execute_query "$host" "$port" "
-        SELECT count(*) 
-        FROM pg_stat_activity 
-        WHERE state = 'active' 
+        SELECT count(*)
+        FROM pg_stat_activity
+        WHERE state = 'active'
+        AND backend_type = 'client backend'
         AND EXTRACT(EPOCH FROM (NOW() - query_start)) > 60;
     ")
+
     long_queries=$(get_numeric "$long_queries" 0)
+
     if [ "$long_queries" -gt 0 ]; then
         echo -e "   ${YELLOW}⚠ ${long_queries} long queries (>60s)${NC}"
+
+        execute_query "$host" "$port" "
+            SELECT
+                pid,
+                usename,
+                ROUND(EXTRACT(EPOCH FROM (NOW() - query_start))) AS secs,
+                LEFT(query, 80)
+            FROM pg_stat_activity
+            WHERE state = 'active'
+            AND backend_type = 'client backend'
+            AND EXTRACT(EPOCH FROM (NOW() - query_start)) > 60
+            ORDER BY query_start
+            LIMIT 5;
+        "
     fi
     
     local lock_count=$(execute_query "$host" "$port" "
@@ -298,11 +315,11 @@ print_database_stats_horizontal() {
         
         local dbs=$(execute_query "$host" "$port" "
             SELECT datname,
-                   ROUND(pg_database_size(datname) / 1024 / 1024 / 1024::FLOAT, 2) as size_gb,
-                   numbackends,
-                   ROUND((xact_commit + xact_rollback)::FLOAT / NULLIF(EXTRACT(EPOCH FROM (NOW() - pg_postmaster_start_time())), 0), 1) as tps,
-                   ROUND(100.0 * blks_hit / NULLIF(blks_hit + blks_read, 0), 1) as cache_hit,
-                   temp_files
+                ROUND((pg_database_size(datname) / 1024.0 / 1024.0 / 1024.0)::numeric, 2) as size_gb,
+                numbackends,
+                ROUND((xact_commit + xact_rollback)::FLOAT / NULLIF(EXTRACT(EPOCH FROM (NOW() - pg_postmaster_start_time())), 0), 1) as tps,
+                ROUND(100.0 * blks_hit / NULLIF(blks_hit + blks_read, 0), 1) as cache_hit,
+                temp_files
             FROM pg_stat_database
             WHERE datname NOT IN ('template0', 'template1')
             ORDER BY pg_database_size(datname) DESC
