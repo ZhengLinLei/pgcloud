@@ -22,10 +22,10 @@ pglog "            To avoid this, mount the configuration file to the container.
 # Check if configuration exists
 if [ -f $PGB_CONF_PATH/$PGB_LOCK_FILE ]; then
     pglog "Directory appears to contain a previous configuration; Skipping initialization of config files"
-    pglog "To reset the configuration, remove the lock file `$PGB_CONF_PATH/$PGB_LOCK_FILE` and restart the container"
+    pglog "To reset the configuration, remove the lock file '$PGB_CONF_PATH/$PGB_LOCK_FILE' and restart the container"
     pglog "If any error occurs, please check the logs and fix the error manually or remove the lock file and let system to write the configuration"
 else
-    pglog "Initializing pgpool configuration files"
+    pglog "Initializing pgbouncer configuration files"
     
     pglog "----- Generating Database conf ------"
 
@@ -38,6 +38,10 @@ else
     if [ -f "$CONF_BASE_PATH/server/backend.env" ]; then
         pglog "----- Using backend.env ------"
         source $CONF_BASE_PATH/server/backend.env
+
+        # Backend used to read the user password hash (first RW host)
+        BACKEND_HOST="${RW_BACKEND_HOST%%,*}"
+        BACKEND_PORT="${RW_BACKEND_PORT:-$BACKEND_PORT}"
 
         if [ -z "$RW_BACKEND_NUM" ]; then
             pglog "ERROR: RW_BACKEND_NUM is not set"
@@ -65,7 +69,7 @@ else
 
         # Check if set RO
         if [ "$RO_BACKEND_NUM" -gt 0 ]; then
-            if [ -z "$RO_BACKEND_HOST$" ]; then
+            if [ -z "$RO_BACKEND_HOST" ]; then
                 pglog "ERROR: RO_BACKEND_HOST is not set"
                 exit 1
             fi
@@ -74,8 +78,8 @@ else
                 exit 1
             fi
 
-            pglog "$RO_POSTGRES_DB = host=$RO_BACKEND_HOST port=$RW_BACKEND_PORT dbname=$POSTGRES_DB"
-            echo "$RO_POSTGRES_DB = host=$RO_BACKEND_PORT port=$RW_BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
+            pglog "$RO_POSTGRES_DB = host=$RO_BACKEND_HOST port=$RO_BACKEND_PORT dbname=$POSTGRES_DB"
+            echo "$RO_POSTGRES_DB = host=$RO_BACKEND_HOST port=$RO_BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
         fi
     else
         pglog "----- Using environment variables ------"
@@ -88,7 +92,7 @@ else
     pglog "[pgbouncer]"
     pglog "listen_addr = *"
     pglog "listen_port = $PGB_PORT"
-    pglog "auth_type   = $PCB_AUTH"
+    pglog "auth_type   = $PGB_AUTH"
     pglog "auth_file   = $PGB_CONF_PATH/auth_file.cfg"
 
     echo "[pgbouncer]"                                   >> $CONF_BASE_PATH/pgbouncer.ini
@@ -96,6 +100,8 @@ else
     echo "listen_port = $PGB_PORT"                       >> $CONF_BASE_PATH/pgbouncer.ini
     echo "auth_type   = $PGB_AUTH"                       >> $CONF_BASE_PATH/pgbouncer.ini
     echo "auth_file   = $PGB_CONF_PATH/auth_file.cfg"    >> $CONF_BASE_PATH/pgbouncer.ini
+    # Allow the main user to run SHOW POOLS/CLIENTS/... on the admin console (scripts/*.sh)
+    echo "admin_users = $POSTGRES_USER"                  >> $CONF_BASE_PATH/pgbouncer.ini
 
     pglog "----- Generating Limits conf ------"
 
@@ -146,7 +152,12 @@ else
 
 
     # Move to config path
+    mkdir -p $PGB_CONF_PATH
     cp -rfa $CONF_BASE_PATH/. $PGB_CONF_PATH
+
+    # Mark configuration as generated, so a container restart does not append it again
+    touch $PGB_CONF_PATH/$PGB_LOCK_FILE
+    pglog "Configuration generated, lock file created: $PGB_CONF_PATH/$PGB_LOCK_FILE"
 
 fi
 

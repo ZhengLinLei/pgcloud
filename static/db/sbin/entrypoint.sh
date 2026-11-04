@@ -429,7 +429,7 @@ _main() {
 
 			# Saving slot id to a file - Remmber that slots are unique and start with 'pgcloud'
 			# Saving in temporal folder, then it will be moved to the final destination $PGDATA
-			sudo echo $slot > $PGCDATA/conf/PGC_SLOT || {
+			echo "$slot" > $PGCDATA/conf/PGC_SLOT || {
 				pglog "Error saving slot id to file. Please manually set the value to file $PGDATA/PGC_SLOT with the slot id: $slot"
 				exit 1
 			}
@@ -514,6 +514,11 @@ _main() {
 
 				EOM
 			fi
+
+			# Store this node's own slot id inside PGDATA (used by promote/redirect/depromote).
+			# On replicas this also overwrites the PGC_SLOT copied from the primary by pg_basebackup.
+			echo "$slot" > "$PGDATA/PGC_SLOT"
+			pglog "Slot id saved in $PGDATA/PGC_SLOT ... ok"
 		else
 			cat <<-'EOM'
 

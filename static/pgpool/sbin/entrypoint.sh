@@ -23,7 +23,7 @@ pglog "            To avoid this, mount the configuration file to the container.
 # Check if configuration exists
 if [ -f $PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE ]; then
     pglog "Directory appears to contain a previous configuration; Skipping initialization of config files"
-    pglog "To reset the configuration, remove the lock file `$PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE` and restart the container"
+    pglog "To reset the configuration, remove the lock file '$PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE' and restart the container"
     pglog "If any error occurs, please check the logs and fix the error manually or remove the lock file and let system to write the configuration"
 else
     pglog "Initializing pgpool configuration files"
@@ -119,7 +119,7 @@ else
 
             echo $i > /etc/pgpool2/pgpool_node_id
 
-            pglog "Node id detected for this node: $1"
+            pglog "Node id detected for this node: $i"
         fi
 
         pglog "hostname$i           = $NODE_PGPOOL_HOST"
@@ -148,7 +148,7 @@ else
     # Global configuration
     pglog "Configurating global parameters"
     pglog "port                 =  $PGPOOL_PORT"
-    pglog "max_pool             =  $PGPOOL_POOL" 
+    pglog "max_pool             =  $MAX_POOL" 
     pglog "num_init_children    =  $NUM_INIT_CHILDREN"
     pglog "load_balance_mode    =  $PGPOOL_BALANCE_MODE"
     pglog "sr_check_period     =   $REPLICA_CHECK_PERIOD"
@@ -212,6 +212,10 @@ else
 
     # Move to config path
     cp -rfa $CONF_BASE_PATH/. $PGPOOL_CONF_PATH
+
+    # Mark configuration as generated, so a container restart does not append it again
+    touch $PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE
+    pglog "Configuration generated, lock file created: $PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE"
 
 fi
 

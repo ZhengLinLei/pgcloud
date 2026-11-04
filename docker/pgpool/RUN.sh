@@ -9,7 +9,9 @@ docker run  -dit --rm --network=host          \
             --env-file ./.env                 \
             -v /etc/localtime:/etc/localtime  \
             -v ./.env:/opt/pgcloud/.env       \
-            -v ./conf:/opt/pgcloud/conf       \
+            -v ./conf/pgpool:/opt/pgcloud/conf/pgpool       \
+            -v ./conf/postgres:/opt/pgcloud/conf/postgres   \
+            -v ./conf/pgbouncer:/opt/pgcloud/conf/pgbouncer \
             $IMAGE_NAME bash
 
 docker exec -it $CONTAINER_NAME bash

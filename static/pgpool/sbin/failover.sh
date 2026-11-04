@@ -22,7 +22,7 @@ start_time=$(date +%s)
 PGPOOL_CONF_FILE="/etc/pgpool2"
 SCRIPT_LOG="$PGCDATA/log/failover.log"
 STATUS_SCRIPT=$PGCDATA/script/status.sh
-ATTACH_SCRIPT=$PGCDATA/script/attach.sh
+ATTACH_SCRIPT=$PGCDATA/tools/attach.sh
 
 # Log function
 pglog () {
@@ -88,16 +88,16 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
 
     # Get server data
     pglog "Retrieving died primary node ssh data..."
-    source $PSQL_SERVER_FILE_PATH/server$OLD_PRIMARY_NODE_ID.env
+    source $SERVER_CONF_PATH/server$OLD_PRIMARY_NODE_ID.env
     SSH_USER0=$SSH_USER
     SSH_PORT0=$SSH_PORT
     SSH_PASS0=$SSH_PASS
 
     pglog "Retrieving new primary node ssh data..."
-    source $PSQL_SERVER_FILE_PATH/server$NEW_MASTER_NODE_ID.env
+    source $SERVER_CONF_PATH/server$NEW_MASTER_NODE_ID.env
     SSH_USER1=$SSH_USER
     SSH_PORT1=$SSH_PORT
-    SSH_PASS1=$SSH_PASS0
+    SSH_PASS1=$SSH_PASS
 
     # %h = ip new primary
     # %p = port new primary
@@ -255,7 +255,7 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
     fi
 
     # Move to config path
-    cp -rf $BASE_PATH/conf/pgpool.conf $PGPOOL_CONF_FILE
+    cp -rf $PGCDATA/conf/pgpool.conf $PGPOOL_CONF_FILE
 
     # Reload
     pgpool reload &
@@ -269,7 +269,7 @@ else
     if [ "$FAILOVER_RECOVER_REPLICA" = "true" ]; then
         # Get server data
         pglog "Retrieving died primary node ssh data..."
-        source $PSQL_SERVER_FILE_PATH/server$FAILED_NODE_ID.env
+        source $SERVER_CONF_PATH/server$FAILED_NODE_ID.env
         SSH_USER0=$SSH_USER
         SSH_PORT0=$SSH_PORT
         SSH_PASS0=$SSH_PASS

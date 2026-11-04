@@ -22,9 +22,9 @@ if [ ! -f "$PCPPASSFILE" ]; then
     echo "Pass file generated!"
 fi
 
-iRet=$(pcp_node_info   -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w -n $1 | grep -E "down|quarantine")
+iRet=$(pcp_node_info   -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w -n $1 | grep -Ei "status.*(down|quarantine)")
 
-if [ "$iRet" != " " ]; then
+if [ -n "$iRet" ]; then
     echo "Detaching the node $1"
     pcp_detach_node -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w -n $1
     echo "After detaching the system will attach again the node..."

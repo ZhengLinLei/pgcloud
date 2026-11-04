@@ -3,7 +3,7 @@
 # Syntax: promote.sh [<new_primary_ip> <new_primary_port> <old_primary_ip> <old_primary_port>] (optional)
 
 # Get role path
-GETROLE_SCRIPT="$PGDATA/script/getrole.sh"
+GETROLE_SCRIPT="$PGCDATA/script/getrole.sh"
 
 # Check if is replica, if not exit
 ROLE=$($GETROLE_SCRIPT)
@@ -22,7 +22,8 @@ echo "============================"
 
 iRet=$(psql -At -U $POSTGRES_USER -d $POSTGRES_DB -p $PGPORT -c "SELECT CASE WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0 ELSE EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp()) END AS log_delay;") && {
     echo "Getting WAL apply delay ... ok"
-    iRet=$(echo $iRet | awk '{print $1}')
+    # EXTRACT(EPOCH ...) returns a decimal; bash only compares integers
+    iRet=$(echo $iRet | awk '{printf "%d", $1}')
 } || {
     echo "Getting WAL apply delay ... fail"
 }
@@ -37,7 +38,7 @@ else
     echo "WAL streaming synchronized ... fail"
     echo "Checking WAL risk ... ok"
     # if time is 0
-    if [ "$PROMOTE_MIN_DELAY" -eq "0" ] || [ "$iRet" -le "$PROMOTE_MIN_DELAY" ]; then
+    if [ "${PROMOTE_MIN_DELAY:-0}" -eq "0" ] || [ "$iRet" -le "$PROMOTE_MIN_DELAY" ]; then
         echo "Risk accepted with PROMOTE_MIN_DELAY = $PROMOTE_MIN_DELAY ... ok"
         echo "Continue execution"
     else

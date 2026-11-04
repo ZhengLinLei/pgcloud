@@ -22,14 +22,14 @@ if [ ! -f "$PCPPASSFILE" ]; then
     echo "Pass file generated!"
 fi
 
-iRet=$(pcp_node_info -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w $1 | grep -E "down|quarantine")
+iRet=$(pcp_node_info -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w -n $1 | grep -Ei "status.*(down|quarantine)")
 
-if [ "$iRet" != " " ]; then
-    pcp_attach_node -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w $1
+if [ -n "$iRet" ]; then
+    pcp_attach_node -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w -n $1
     echo "Node $1 started failing back. Do not close or stop the process"
     echo "Wait until the attaching is completed"
 else
     echo "Node $1 is not down, attaching is allowed only for down node"
 fi
 
-pcp_node_info -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w $1
+pcp_node_info -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -v -w -n $1

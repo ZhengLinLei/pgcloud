@@ -9,7 +9,7 @@ if [ -z "$1" ] || [ -z "$2" ]; then
 fi
 
 # Get role path
-GETROLE_SCRIPT="$PGDATA/script/getrole.sh"
+GETROLE_SCRIPT="$PGCDATA/script/getrole.sh"
 
 # Check if is replica, if not exit
 ROLE=$($GETROLE_SCRIPT)
@@ -37,35 +37,41 @@ rm -f $PGDATA/recovery.conf
 echo "Removing postmaster.pid and recovery.conf ... ok"
 
 # Get replica slot name
-slot=$(cat $PGDATA/PGC_SLOT)
-echo "Replica slot: $replica_slot "
+slot=$(cat "$PGDATA/PGC_SLOT" 2>/dev/null || cat "$PGCDATA/conf/PGC_SLOT" 2>/dev/null)
+if [ -z "$slot" ]; then
+    echo "Replica slot id not found in $PGDATA/PGC_SLOT ... fail"
+    exit 1
+fi
+echo "Replica slot: pgcloud$slot"
+
+# Make sure the slot exists on the new primary (ignore error if it already exists)
+export PGPASSWORD=${POSTGRES_PASSWORD}
+psql -At -U $POSTGRES_USER -d $POSTGRES_DB -p $2 -h $1 -c "SELECT * FROM pg_create_physical_replication_slot('pgcloud$slot');" \
+    && echo "Creating slot [pgcloud$slot] in $1:$2 ... ok" \
+    || echo "Creating slot [pgcloud$slot] in $1:$2 ... skipped (already exists or primary unreachable)"
+unset PGPASSWORD
 
 
 # Write configuration of new primary
-echo -e "primary_conninfo = 'user=$REPLICA_USER password=$REPLICA_PASS application_name=$BACKEND_NAME hannel_binding=prefer host=$1 port=$2 sslmode=prefer sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable' \n \
+echo -e "primary_conninfo = 'user=$REPLICA_USER password=$REPLICA_PASS application_name=$BACKEND_NAME channel_binding=prefer host=$1 port=$2 sslmode=prefer sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable' \n \
         primary_slot_name = 'pgcloud$slot'" > $PGDATA/postgresql.auto.conf
 
 echo "Writing configuration of new primary $1:$2 ... ok"
 
 # Replace to physical machine data
-sed -i "s/^PRIMARY_HOST=.*/PRIMARY_HOST=$1/" $PGCDATA/.env || {
-    echo ".env file busy, using cat for replace PRIMARY_HOST"
-    # If file is busy
-    sed "s/^PRIMARY_HOST=.*/PRIMARY_HOST=$1/" $PGCDATA/.env > $PGCDATA/.env.tmp
-    > $PGCDATA/.env
-    cat $PGCDATA/.env.tmp > $PGCDATA/.env
-    rm -f $PGCDATA/.env.tmp
+# Update KEY=VALUE in the mounted .env file.
+# The file is usually a bind mount, so `sed -i` (rename) fails; rewrite it in place instead.
+update_env() {
+    local key=$1 value=$2 file="$PGCDATA/.env" tmp
+    tmp=$(mktemp)
+    sed "s|^${key}=.*|${key}=${value}|" "$file" > "$tmp" && cat "$tmp" > "$file"
+    rm -f "$tmp"
 }
+
+update_env PRIMARY_HOST "$1"
 echo "Changing PRIMARY_HOST in physical machine .env file to $1 ... ok"
 
-sed -i "s/^PRIMARY_PORT=.*/PRIMARY_PORT=$2/" $PGCDATA/.env || {
-    echo ".env file busy, using cat for replace PRIMARY_PORT"
-    # If file is busy
-    sed "s/^PRIMARY_HOST=.*/PRIMARY_HOST=$1/" $PGCDATA/.env > $PGCDATA/.env.tmp
-    > $PGCDATA/.env
-    cat $PGCDATA/.env.tmp > $PGCDATA/.env
-    rm -f $PGCDATA/.env.tmp
-}
+update_env PRIMARY_PORT "$2"
 echo "Changing PRIMARY_PORT in physical machine .env file to $2 ... ok"
 
 echo "Depromoting to $1:$2 ... ok"
