@@ -1,0 +1,130 @@
+# PgCloud - single host demo cluster
+#
+#   db0 (primary) ──► db1, db2 (streaming replicas)
+#          ▲
+#        pgpool  (load balancing, :5434)
+#          ▲
+#       pgbouncer (connection pooling, :6432)
+#
+# Quick start:
+#   cp .env.example .env      # set real passwords
+#   docker compose up -d --build
+#   psql -h localhost -p 6432 -U u_pgcloud db_pgcloud   # through pgbouncer -> pgpool
+#
+# Two-tier only (no pgbouncer):  docker compose up -d db0 db1 db2 pgpool
+#
+# NOTE: this file runs every node on ONE machine, useful for development and
+# evaluation. Automatic failover recovery (promote/redirect over SSH) is meant
+# for multi-host deployments and is not wired up here.
+
+x-db-common: &db-common
+  build:
+    context: .
+    dockerfile: docker/db/Dockerfile
+  image: pgcloud/db:dev
+  env_file: docker/db/.env.example          # defaults, overridden below
+  stop_grace_period: 60s
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U $${POSTGRES_USER}"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 30s
+
+x-secrets: &secrets
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (cp .env.example .env)}
+  REPLICA_PASS: ${REPLICA_PASS:?Set REPLICA_PASS in .env}
+
+services:
+  db0:
+    <<: *db-common
+    environment:
+      <<: *secrets
+      NODE_ROLE: primary
+      BACKEND_NAME: node0
+    volumes:
+      - db0-data:/opt/pgdata
+
+  db1:
+    <<: *db-common
+    environment:
+      <<: *secrets
+      NODE_ROLE: replica
+      BACKEND_NAME: node1
+      PRIMARY_HOST: db0
+      PRIMARY_PORT: 5432
+    volumes:
+      - db1-data:/opt/pgdata
+    depends_on:
+      db0:
+        condition: service_healthy
+
+  db2:
+    <<: *db-common
+    environment:
+      <<: *secrets
+      NODE_ROLE: replica
+      BACKEND_NAME: node2
+      PRIMARY_HOST: db0
+      PRIMARY_PORT: 5432
+    volumes:
+      - db2-data:/opt/pgdata
+    depends_on:
+      db0:
+        condition: service_healthy
+
+  pgpool:
+    build:
+      context: .
+      dockerfile: docker/pgpool/Dockerfile
+    image: pgcloud/pgpool:dev
+    env_file: docker/pgpool/.env.example
+    environment:
+      <<: *secrets
+      PCP_PASS: ${PCP_PASS:?Set PCP_PASS in .env}
+      PGPOOL_HOST: pgpool
+      PGPOOL_NUM: 1                 # single pgpool -> watchdog disabled
+      ENABLE_LOGFILE: "off"         # log to stdout (docker compose logs pgpool)
+    volumes:
+      - ./compose/pgpool/postgres:/opt/pgcloud/conf/postgres:ro
+      - ./compose/pgpool/pgpool:/opt/pgcloud/conf/pgpool:ro
+    ports:
+      - "5434:5434"
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=$${POSTGRES_PASSWORD} psql -h 127.0.0.1 -p 5434 -U $${POSTGRES_USER} -d $${POSTGRES_DB} -Atc 'select 1'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      db0:
+        condition: service_healthy
+      db1:
+        condition: service_healthy
+      db2:
+        condition: service_healthy
+
+  pgbouncer:
+    build:
+      context: .
+      dockerfile: docker/pgbouncer/Dockerfile
+    image: pgcloud/pgbouncer:dev
+    env_file: docker/pgbouncer/.env.example
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKEND_HOST: pgpool
+      BACKEND_PORT: 5434
+    ports:
+      - "6432:6432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      pgpool:
+        condition: service_healthy
+
+volumes:
+  db0-data:
+  db1-data:
+  db2-data:

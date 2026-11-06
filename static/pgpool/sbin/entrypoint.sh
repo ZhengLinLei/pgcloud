@@ -5,6 +5,14 @@ PGPOOL_LOCK_FILE=lock.pgcloud
 
 CONF_BASE_PATH=$PGCDATA/conf
 
+# Refuse to start with placeholder passwords from .env.example
+for var in POSTGRES_PASSWORD REPLICA_PASS PCP_PASS; do
+    if [ -z "${!var}" ] || [ "${!var}" = "change_me" ]; then
+        echo "ERROR: $var is empty or still 'change_me'. Set a real value in .env" >&2
+        exit 1
+    fi
+done
+
 pglog () {
     echo $@
     printf '%s  |  %s\n' "$(date)" "$@" >> $PGCDATA/log/pgcloud.log
@@ -32,6 +40,9 @@ else
     # Reading all files starting from server*.env
     file_count=$(ls -1 $SERVER_CONF_PATH | grep -E 'server[0-9]+\.env' | wc -l)
     pglog "$file_count Postgres servers configuration file found"
+
+    # Make sure appended settings never end up glued to the template's last line
+    echo "" >> $CONF_BASE_PATH/pgpool.conf
 
     # Iterate from server config files
     set -a
@@ -153,12 +164,12 @@ else
     pglog "load_balance_mode    =  $PGPOOL_BALANCE_MODE"
     pglog "sr_check_period     =   $REPLICA_CHECK_PERIOD"
     pglog "sr_check_user       =  '$REPLICA_USER'"
-    pglog "sr_check_password   =  '$REPLICA_PASS'"
+    pglog "sr_check_password   =  '********'"
     pglog "sr_check_database   =  '$POSTGRES_DB'"
     pglog "health_check_period     =   $HEALTH_CHECK_PERIOD"
     pglog "health_check_timeout    =   $HEALTH_CHECK_TIMEOUT"
     pglog "health_check_user       =  '$POSTGRES_USER'"       
-    pglog "health_check_password   =  '$POSTGRES_PASSWORD'"
+    pglog "health_check_password   =  '********'"
     pglog "pcp_port = $PCP_PORT"
 
     echo -e "\n# PGPOOL CONFIG"                         >> $CONF_BASE_PATH/pgpool.conf
@@ -176,6 +187,17 @@ else
     echo "health_check_timeout    =   $HEALTH_CHECK_TIMEOUT"     >> $CONF_BASE_PATH/pgpool.conf
     echo "health_check_user       =  '$POSTGRES_USER'"           >> $CONF_BASE_PATH/pgpool.conf
     echo "health_check_password   =  '$POSTGRES_PASSWORD'"       >> $CONF_BASE_PATH/pgpool.conf
+    echo -e "\n# CLIENT AUTHENTICATION"                 >> $CONF_BASE_PATH/pgpool.conf
+    # SCRAM backends require pgpool to know the user password (stored AES-encrypted below)
+    echo "pool_passwd = 'pool_passwd'"                  >> $CONF_BASE_PATH/pgpool.conf
+    # Authenticate clients in pgpool itself (pool_hba.conf + pool_passwd), required for SCRAM
+    # with connection caching (e.g. when PgBouncer sits in front of pgpool)
+    echo "enable_pool_hba = on"                         >> $CONF_BASE_PATH/pgpool.conf
+    cidrs="${ALLOWED_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
+    for cidr in ${cidrs//,/ }; do
+        printf 'host    all         all         %-21s scram-sha-256\n' "$cidr" >> $CONF_BASE_PATH/pool_hba.conf
+    done
+    pglog "pool_hba.conf: remote access for networks $cidrs"
     echo -e "\n# PCP CONFIGURATION"                     >> $CONF_BASE_PATH/pgpool.conf
     echo "pcp_port = $PCP_PORT"                         >> $CONF_BASE_PATH/pgpool.conf
 
@@ -183,7 +205,7 @@ else
     # Create pcp user
     pglog "----- Generating PCP conf ------"
     pglog " User: $PCP_USER"
-    pglog " Pass: $PCP_PASS"
+    pglog " Pass: ********"
     echo -e "\n$PCP_USER:$(pg_md5 $PCP_PASS)" >> $CONF_BASE_PATH/pcp.conf
 
 
@@ -212,6 +234,20 @@ else
 
     # Move to config path
     cp -rfa $CONF_BASE_PATH/. $PGPOOL_CONF_PATH
+
+    # Store the database user password AES-encrypted in pool_passwd.
+    # The key is random per container and only readable by root (~/.pgpoolkey is read by pgpool).
+    pglog "----- Generating pool_passwd ------"
+    if [ ! -s ~/.pgpoolkey ]; then
+        head -c 32 /dev/urandom | base64 > ~/.pgpoolkey
+        chmod 600 ~/.pgpoolkey
+    fi
+    pg_enc -m -k ~/.pgpoolkey -f $PGPOOL_CONF_PATH/pgpool.conf -u "$POSTGRES_USER" "$POSTGRES_PASSWORD" > /dev/null || {
+        pglog "ERROR: could not write pool_passwd for $POSTGRES_USER"
+        exit 1
+    }
+    chmod 600 $PGPOOL_CONF_PATH/pool_passwd
+    pglog "pool_passwd entry created for $POSTGRES_USER ... ok"
 
     # Mark configuration as generated, so a container restart does not append it again
     touch $PGPOOL_CONF_PATH/$PGPOOL_LOCK_FILE

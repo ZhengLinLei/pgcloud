@@ -12,7 +12,6 @@ RUN apt upgrade -y
 RUN apt install -y  vim  \
                     curl \
                     wget \
-                    sudo \
                     procps \
                     net-tools \
                     iputils-ping \
@@ -43,17 +42,11 @@ RUN ln -s /opt/pgcloud/sbin/redirect.sh /bin/pgcloud_redirect
 # pgcloud_depromote
 RUN ln -s /opt/pgcloud/sbin/depromote.sh /bin/pgcloud_depromote
 
-# Set read/write permissions to config files and all files
-RUN chmod 777 ./conf
-
-# Add the postgres user to sudoers
-RUN usermod -aG sudo postgres
-# Set no password for sudo to postgres user
-RUN echo "postgres  ALL=(ALL)   NOPASSWD: ALL" >> /etc/sudoers
-
-# Set log folder to postgresql user
-RUN mkdir -p ./log
-RUN chown -R postgres:postgres ./log
+# The entrypoint drops privileges to the postgres user (gosu) before generating the
+# configuration, so postgres must own its config and log folders. No sudo needed.
+RUN mkdir -p ./log \
+    && chown -R postgres:postgres ./conf ./log \
+    && chmod 750 ./conf ./log
 
 # Own entrypoint
 ENTRYPOINT [ "./sbin/entrypoint.sh" ]

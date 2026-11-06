@@ -1,4 +1,4 @@
 #!/bin/bash
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
-psql -U $POSTGRES_USER -p $PGPOOL_PORT -d $POSTGRES_DB -c "show pool_nodes;"
+psql -h 127.0.0.1 -U $POSTGRES_USER -p $PGPOOL_PORT -d $POSTGRES_DB -c "show pool_nodes;"

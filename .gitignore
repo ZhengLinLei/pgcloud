@@ -1,2 +1,5 @@
 dist
 .DS_Store
+# Local configuration (copy from .env.example)
+.env
+!.env.example

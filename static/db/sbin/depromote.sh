@@ -56,6 +56,7 @@ unset PGPASSWORD
 echo -e "primary_conninfo = 'user=$REPLICA_USER password=$REPLICA_PASS application_name=$BACKEND_NAME channel_binding=prefer host=$1 port=$2 sslmode=prefer sslcompression=0 sslcertmode=allow sslsni=1 ssl_min_protocol_version=TLSv1.2 gssencmode=prefer krbsrvname=postgres gssdelegation=0 target_session_attrs=any load_balance_hosts=disable' \n \
         primary_slot_name = 'pgcloud$slot'" > $PGDATA/postgresql.auto.conf
 
+chown postgres:postgres $PGDATA/standby.signal $PGDATA/postgresql.auto.conf
 echo "Writing configuration of new primary $1:$2 ... ok"
 
 # Replace to physical machine data
@@ -63,6 +64,8 @@ echo "Writing configuration of new primary $1:$2 ... ok"
 # The file is usually a bind mount, so `sed -i` (rename) fails; rewrite it in place instead.
 update_env() {
     local key=$1 value=$2 file="$PGCDATA/.env" tmp
+    # No mounted .env (e.g. docker compose): nothing to persist
+    [ -f "$file" ] || { echo "No $file found, skipping $key update"; return 0; }
     tmp=$(mktemp)
     sed "s|^${key}=.*|${key}=${value}|" "$file" > "$tmp" && cat "$tmp" > "$file"
     rm -f "$tmp"

@@ -52,6 +52,8 @@ echo "Reloading configuration ... ok"
 # The file is usually a bind mount, so `sed -i` (rename) fails; rewrite it in place instead.
 update_env() {
     local key=$1 value=$2 file="$PGCDATA/.env" tmp
+    # No mounted .env (e.g. docker compose): nothing to persist
+    [ -f "$file" ] || { echo "No $file found, skipping $key update"; return 0; }
     tmp=$(mktemp)
     sed "s|^${key}=.*|${key}=${value}|" "$file" > "$tmp" && cat "$tmp" > "$file"
     rm -f "$tmp"

@@ -4,6 +4,14 @@ PGB_CONF_PATH=/etc/pgbouncer
 PGB_LOCK_FILE=lock.pgcloud
 CONF_BASE_PATH=$PGCDATA/conf
 
+# Refuse to start with placeholder passwords from .env.example
+for var in POSTGRES_PASSWORD; do
+    if [ -z "${!var}" ] || [ "${!var}" = "change_me" ]; then
+        echo "ERROR: $var is empty or still 'change_me'. Set a real value in .env" >&2
+        exit 1
+    fi
+done
+
 pglog () {
     echo $@
     printf '%s  |  %s\n' "$(date)" "$@" >> $PGCDATA/log/pgcloud.log
@@ -39,10 +47,6 @@ else
         pglog "----- Using backend.env ------"
         source $CONF_BASE_PATH/server/backend.env
 
-        # Backend used to read the user password hash (first RW host)
-        BACKEND_HOST="${RW_BACKEND_HOST%%,*}"
-        BACKEND_PORT="${RW_BACKEND_PORT:-$BACKEND_PORT}"
-
         if [ -z "$RW_BACKEND_NUM" ]; then
             pglog "ERROR: RW_BACKEND_NUM is not set"
             exit 1
@@ -64,7 +68,7 @@ else
             fi
 
             pglog "$POSTGRES_DB = host=$RW_BACKEND_HOST port=$RW_BACKEND_PORT dbname=$POSTGRES_DB"
-            echo "$POSTGRES_DB = host=$RW_BACKEND_HOST port=$RW_BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
+            echo "$POSTGRES_DB = host=$RW_BACKEND_HOST port=$RW_BACKEND_PORT dbname=$POSTGRES_DB" >> $CONF_BASE_PATH/pgbouncer.ini
         fi
 
         # Check if set RO
@@ -79,12 +83,12 @@ else
             fi
 
             pglog "$RO_POSTGRES_DB = host=$RO_BACKEND_HOST port=$RO_BACKEND_PORT dbname=$POSTGRES_DB"
-            echo "$RO_POSTGRES_DB = host=$RO_BACKEND_HOST port=$RO_BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
+            echo "$RO_POSTGRES_DB = host=$RO_BACKEND_HOST port=$RO_BACKEND_PORT dbname=$POSTGRES_DB" >> $CONF_BASE_PATH/pgbouncer.ini
         fi
     else
         pglog "----- Using environment variables ------"
         pglog "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB"
-        echo "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB password=$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/pgbouncer.ini
+        echo "$POSTGRES_DB = host=$BACKEND_HOST port=$BACKEND_PORT dbname=$POSTGRES_DB" >> $CONF_BASE_PATH/pgbouncer.ini
     fi
 
     pglog "----- Generating Common conf ------"
@@ -116,39 +120,16 @@ else
     # Create auth_file
     pglog "----- Generating auth_file ------"
     pglog " User: $POSTGRES_USER"
-    pglog " Pass: $POSTGRES_PASSWORD"
+    pglog " Pass: ********"
     > $CONF_BASE_PATH/auth_file.cfg
 
-    # Create password for Postgres
-    export PGPASSWORD=$POSTGRES_PASSWORD
-    ENCRYPTED_PASS=$(psql -At -h $BACKEND_HOST -p $BACKEND_PORT -U $POSTGRES_USER -d $POSTGRES_DB -c "SELECT rolpassword FROM pg_authid WHERE rolname='$POSTGRES_USER';")
-    
-    # If error exit with error and log
-    if [ $? -ne 0 ]; then
-        # Print to stderror
-        echo "ERROR: Please check logs. Could not connect to the database" 1>&2
-        pglog "ERROR: Please check logs. Could not connect to the database"
-        exit 1
-    fi
-
-    pglog "Backend password: $ENCRYPTED_PASS"
-    if [ "$PGB_AUTH" == "md5" ]; then
-        # Check if password is already encrypted in md5
-        if [[ $ENCRYPTED_PASS == "md5"* ]]; then
-            pglog "Password is already encrypted in md5"
-        else
-            pglog "WARNING: Backend password is not encrypted in md5, this may cause authentication errors"
-        fi
-        ENCRYPTED_PASS="md5$(echo -n "$POSTGRES_PASSWORD""$POSTGRES_USER" | md5sum | awk '{print $1}')"
-    elif [ "$PGB_AUTH" == "scram-sha-256" ]; then
-        # Check if password is already encrypted in scram-sha-256
-        if [[ $ENCRYPTED_PASS == "SCRAM-SHA-256"* ]]; then
-            pglog "Password is already encrypted in SCRAM-SHA-256"
-        else
-            pglog "WARNING: Backend password is not encrypted in SCRAM-SHA-256, this may cause authentication errors"
-        fi
-    fi
-    echo "\"$POSTGRES_USER\" \"$ENCRYPTED_PASS\"" >> $CONF_BASE_PATH/auth_file.cfg
+    # Store the password itself (not the Postgres SCRAM/MD5 hash). PgBouncer derives the
+    # md5/SCRAM exchange from it for both clients and servers. With a SCRAM *hash* PgBouncer
+    # falls back to "SCRAM pass-through", which only works when the server uses the very same
+    # salt (direct Postgres) and fails against pgpool, which builds its own verifier.
+    # The file is only readable by root and the pgbouncer user.
+    printf '"%s" "%s"\n' "$POSTGRES_USER" "$POSTGRES_PASSWORD" >> $CONF_BASE_PATH/auth_file.cfg
+    chmod 640 $CONF_BASE_PATH/auth_file.cfg $CONF_BASE_PATH/pgbouncer.ini
 
 
     # Move to config path

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if [ ! -f ./.env ]; then
+    echo "Missing .env. Create it with: cp .env.example .env  (and set your passwords)"
+    exit 1
+fi
+
 IMAGE_NAME=pgcloud_bouncer
 CONTAINER_NAME=pgcloud_bouncer
 

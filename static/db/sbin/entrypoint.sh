@@ -322,62 +322,66 @@ configuration_setup() {
     pglog "Starting pgcloud system setup"
 
     # Check user
-    user=$(sudo whoami)
+    user=$(whoami)
 	echo "I am user: $user"
 
     # Init
     # Apply for general config
-    sudo sed -i -e "s/replica_user/${REPLICA_USER}/g" $PGCDATA/conf/pg_hba.conf
-    pglog "Updating pg_hba.conf ... ok"
+    # Remote access only from the networks listed in ALLOWED_CIDRS (comma separated)
+    local auth="${POSTGRES_HOST_AUTH_METHOD:-scram-sha-256}"
+    local cidrs="${ALLOWED_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
+    for cidr in ${cidrs//,/ }; do
+        printf 'host    replication     %-15s %-23s %s\n' "$REPLICA_USER" "$cidr" "$auth" >> $PGCDATA/conf/pg_hba.conf
+        printf 'host    all             %-15s %-23s %s\n' "all" "$cidr" "$auth"           >> $PGCDATA/conf/pg_hba.conf
+    done
+    pglog "Updating pg_hba.conf for networks: $cidrs ... ok"
 
 	# Configurate postgres.conf
 	pglog "Writing init configuraton on system"
     sys_ram_value=$( free -g -t | awk '/^Total:/{print $2}')
     sys_ram_units="GB"
     pglog "System with $sys_ram_value $sys_ram_units"
-	echo "# System with $sys_ram_value $sys_ram_units"				| sudo tee -a $PGCDATA/conf/postgresql.conf
-    echo "max_connections               =  $MAX_CONNECTIONS"	   	| sudo tee -a $PGCDATA/conf/postgresql.conf
-    echo "shared_buffers                =  $SHARED_BUFFERS"      	| sudo tee -a $PGCDATA/conf/postgresql.conf
-    echo "work_mem                      =  $WORK_MEM"      			| sudo tee -a $PGCDATA/conf/postgresql.conf
-    echo "effective_cache_size          =  $EFFECTIVE_CACHE_SIZE"  	| sudo tee -a $PGCDATA/conf/postgresql.conf
-	echo "maintenance_work_mem 		 	=  $MAINTENANCE_WORK_MEM"	| sudo tee -a $PGCDATA/conf/postgresql.conf
-    echo -e "\n"                                         			| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "# System with $sys_ram_value $sys_ram_units"				| tee -a $PGCDATA/conf/postgresql.conf
+    echo "max_connections               =  $MAX_CONNECTIONS"	   	| tee -a $PGCDATA/conf/postgresql.conf
+    echo "shared_buffers                =  $SHARED_BUFFERS"      	| tee -a $PGCDATA/conf/postgresql.conf
+    echo "work_mem                      =  $WORK_MEM"      			| tee -a $PGCDATA/conf/postgresql.conf
+    echo "effective_cache_size          =  $EFFECTIVE_CACHE_SIZE"  	| tee -a $PGCDATA/conf/postgresql.conf
+	echo "maintenance_work_mem 		 	=  $MAINTENANCE_WORK_MEM"	| tee -a $PGCDATA/conf/postgresql.conf
+    echo -e "\n"                                         			| tee -a $PGCDATA/conf/postgresql.conf
 
 	# Echo slot
-	echo "# Slot id: $(cat $PGCDATA/conf/PGC_SLOT)"           			| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "# Slot id: $(cat $PGCDATA/conf/PGC_SLOT)"           			| tee -a $PGCDATA/conf/postgresql.conf
 
 	# Sync rule
-	echo "synchronous_standby_names	 =  '$SYNCHRONOUS_RULE ($SYNCHRONOUS_NAME)'" 	| sudo tee -a $PGCDATA/conf/postgresql.conf
-	echo -e "\n"                                         						| sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo "synchronous_standby_names	 =  '$SYNCHRONOUS_RULE ($SYNCHRONOUS_NAME)'" 	| tee -a $PGCDATA/conf/postgresql.conf
+	echo -e "\n"                                         						| tee -a $PGCDATA/conf/postgresql.conf
 
 	# Logs
 	if [ "$ENABLE_LOGFILE" = "on" ]; then
-		echo "logging_collector 		= on"						| sudo tee -a $PGCDATA/conf/postgresql.conf
+		echo "logging_collector 		= on"						| tee -a $PGCDATA/conf/postgresql.conf
 		# Log directory on PGCLOUD instead of PGDATA
 		# When setting log_directory to PGDATA directory it will be copied by all replicas
 		# This is not the desired behavior. And to avoid this, we will set the log directory to PGCLOUD
-		echo "log_directory 			= '$PGCDATA/log'"			| sudo tee -a $PGCDATA/conf/postgresql.conf
-		echo "log_filename 			 	= '$LOG_FILENAME'"			| sudo tee -a $PGCDATA/conf/postgresql.conf
-		echo "log_truncate_on_rotation  = on"						| sudo tee -a $PGCDATA/conf/postgresql.conf
-		echo "log_rotation_age 		 	= $LOG_ROTATE_AGE"			| sudo tee -a $PGCDATA/conf/postgresql.conf
-		echo "log_rotation_size		 	= 0"						| sudo tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_directory 			= '$PGCDATA/log'"			| tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_filename 			 	= '$LOG_FILENAME'"			| tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_truncate_on_rotation  = on"						| tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_rotation_age 		 	= $LOG_ROTATE_AGE"			| tee -a $PGCDATA/conf/postgresql.conf
+		echo "log_rotation_size		 	= 0"						| tee -a $PGCDATA/conf/postgresql.conf
 	fi
 
 	# Add port by our own way. Postgres already will set Port with $PGPORT env variable
-	echo -e "\n"                       		| sudo tee -a $PGCDATA/conf/postgresql.conf
-	echo "port = $PGPORT"					| sudo tee -a $PGCDATA/conf/postgresql.conf
-	echo -e "\n"                       		| sudo tee -a $PGCDATA/conf/postgresql.conf
-	echo "password_encryption = $POSTGRES_HOST_AUTH_METHOD" | sudo tee -a $PGCDATA/conf/postgresql.conf
+	echo -e "\n"                       		| tee -a $PGCDATA/conf/postgresql.conf
+	echo "port = $PGPORT"					| tee -a $PGCDATA/conf/postgresql.conf
+	echo -e "\n"                       		| tee -a $PGCDATA/conf/postgresql.conf
+	echo "password_encryption = $POSTGRES_HOST_AUTH_METHOD" | tee -a $PGCDATA/conf/postgresql.conf
 
 	pglog "Configurating postgres.conf ... ok"
 
 	# Copy conf files to $PGDATA
 
 	echo -e "\n\n"
-    sudo cp -rfa $PGCDATA/conf/*.conf $PGDATA
+    cp -rfa $PGCDATA/conf/*.conf $PGDATA
     pglog "Moving conf files to $PGDATA ... ok"
-    # Change owner of the files
-    sudo chown -R postgres:postgres $PGDATA
 
     # Fix permissions after copying files
     chmod 00700 "$PGDATA" || :
@@ -420,6 +424,13 @@ _main() {
 		# only run initialization on an empty data directory
 		if [ -z "$DATABASE_ALREADY_EXISTS" ]; then
 			docker_verify_minimum_env
+			# Refuse to start with placeholder passwords from .env.example
+			for var in POSTGRES_PASSWORD REPLICA_PASS; do
+			    if [ -z "${!var}" ] || [ "${!var}" = "change_me" ]; then
+			        echo "ERROR: $var is empty or still 'change_me'. Set a real value in .env" >&2
+			        exit 1
+			    fi
+			done
 
 			pglog "Environment variables are correct ... ok"
 
@@ -449,7 +460,7 @@ _main() {
 
 				# Update port in postgresql.conf with $PGPORT
 				# Port could be any value, so we need to update the port in postgresql.conf
-				sudo sed -i -E "s/(port =).*/\1 $PGPORT/g" $PGDATA/postgresql.conf				
+				sed -i -E "s/(port =).*/\1 $PGPORT/g" $PGDATA/postgresql.conf				
                 
 				pglog ""
 				pglog "     [ok] pg_basebackup from primary node"

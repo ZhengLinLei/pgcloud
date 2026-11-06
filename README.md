@@ -24,7 +24,7 @@
 <br>
 <p align="center">
     <a href="https://www.gnu.org/licenses/gpl-3.0.html">
-        <img src="https://img.shields.io/badge/License-GPL%203.o-blue.svg" alt="License" />
+        <img src="https://img.shields.io/badge/License-GPL%203.0-blue.svg" alt="License" />
     </a>
     &emsp;    
     <a>
@@ -40,6 +40,49 @@
 <p align="justify" style="font-family: monospace;">
     PgCloud is an <code>automatic system</code> for generating distributed nodes of PostgreSQL, PgPool and PgBouncer without the need to remain on a physical machine, since it uses docker technology. The system is capable of generating Postgres nodes with database replication on the same or different machines, load balancing with PgPool and connection caching with PgBouncer.
 </p> 
+
+<br><br>
+
+## 🚀  Quick start
+
+Requirements: Docker with the Compose plugin (`docker compose version`).
+
+```bash
+git clone https://github.com/ZhengLinLei/pgcloud.git
+cd pgcloud
+cp .env.example .env        # then edit .env and set real passwords
+docker compose up -d --build
+```
+
+This starts a full three-tier cluster on one machine:
+
+| Service     | Role                                  | Port   |
+|-------------|---------------------------------------|--------|
+| `db0`       | PostgreSQL primary                    | –      |
+| `db1`,`db2` | PostgreSQL streaming replicas         | –      |
+| `pgpool`    | Load balancing (reads to replicas)    | `5434` |
+| `pgbouncer` | Connection pooling                    | `6432` |
+
+Connect through PgBouncer (or directly to PgPool on port `5434`):
+
+```bash
+psql -h localhost -p 6432 -U u_pgcloud db_pgcloud
+```
+
+Useful commands:
+
+```bash
+docker compose ps                                   # health of every node
+docker compose logs -f pgpool                       # follow logs
+docker compose exec pgpool ./script/status.sh       # pgpool view of the nodes
+docker compose exec db0 ./script/cluster.sh         # replication status on the primary
+docker compose down                                 # stop (keeps data)
+docker compose down -v                              # stop and delete all data
+```
+
+Two-tier only (without PgBouncer): `docker compose up -d db0 db1 db2 pgpool`.
+
+> **Note:** `compose.yaml` runs every node on a single host, which is ideal for development and evaluation. For production, run each node on its own machine with the scripts in `docker/<service>/` (copy `.env.example` to `.env` in each folder) — see the [Wiki](https://github.com/ZhengLinLei/pgcloud/wiki) and the [Book](./doc/wiki).
 
 <br><br>
 ## 📁  What does PgCloud have?
