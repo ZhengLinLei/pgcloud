@@ -59,4 +59,5 @@ pglog "                    ---------                       "
 pglog "Failback done for node: $FAILED_NODE_ID "
 
 # Get status
-$STATUS_SCRIPT >> $SCRIPT_LOG
+# Asynchronous: querying pgpool now would deadlock (it waits for this script to finish)
+(sleep 10; $STATUS_SCRIPT) >> $SCRIPT_LOG 2>&1 < /dev/null &

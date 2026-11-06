@@ -227,7 +227,8 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
                 pglog "Node recovered succesfully as replica, continue with normal execution"
                 pglog "Attaching the node $FAILED_NODE_ID back to up and allow to receive request"
 
-                $ATTACH_SCRIPT $FAILED_NODE_ID >> $SCRIPT_LOG 2>&1
+                # Run after this script returns: pgpool is blocked until failover_command ends
+                (sleep 15; $ATTACH_SCRIPT $FAILED_NODE_ID) >> $SCRIPT_LOG 2>&1 < /dev/null &
             } || {
                 pglog ">> Executing ssh to old primary machine failed..."
                 pglog "<< Avoiding force call. LAUCH PRIMARY AS REPLICA IN DEPROMOTION MODE"
@@ -261,7 +262,8 @@ if [ "${FAILED_NODE_ID}" == "${OLD_PRIMARY_NODE_ID}" ]; then
     pgpool reload &
 
     # Get status
-    $STATUS_SCRIPT >> $SCRIPT_LOG
+    # Asynchronous: querying pgpool now would deadlock (it waits for this script to finish)
+    (sleep 20; $STATUS_SCRIPT) >> $SCRIPT_LOG 2>&1 < /dev/null &
     
 else
     pglog "Node ${FAILED_NODE_ID} dies, but it's not the primary node."
@@ -298,7 +300,8 @@ else
                 # Attach
                 pglog "Attaching the node $FAILED_NODE_ID back to up and allow to receive request"
 
-                $ATTACH_SCRIPT $FAILED_NODE_ID >> $SCRIPT_LOG 2>&1
+                # Run after this script returns: pgpool is blocked until failover_command ends
+                (sleep 15; $ATTACH_SCRIPT $FAILED_NODE_ID) >> $SCRIPT_LOG 2>&1 < /dev/null &
             } || {
                 pglog "_________________________________________________________"
                 pglog "Cannot recover the node, let it died [Aborting]  MANUAL RECOVERY MUST NEEDED"

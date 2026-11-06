@@ -13,7 +13,7 @@ for var in POSTGRES_PASSWORD; do
 done
 
 pglog () {
-    echo $@
+    echo "$*"
     printf '%s  |  %s\n' "$(date)" "$@" >> $PGCDATA/log/pgcloud.log
 }
 

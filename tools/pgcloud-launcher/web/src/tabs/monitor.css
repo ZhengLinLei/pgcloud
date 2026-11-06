@@ -1,0 +1,130 @@
+.mon-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 28px;
+  align-items: center;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+}
+.kpi {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.kpi span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.kpi b {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kpi.big b {
+  font-size: 18px;
+  letter-spacing: 2px;
+}
+.mon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 10px;
+}
+.mon-card {
+  --c: var(--pg);
+  position: relative;
+  overflow: hidden;
+  border-left: 3px solid var(--c);
+}
+.mon-card.down {
+  border-color: var(--danger);
+  background: linear-gradient(var(--danger-soft), var(--danger-soft)), var(--panel);
+}
+.mon-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+.mon-card .pg-node-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 3px;
+  color: var(--c);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+.mon-error {
+  margin: 0 12px 10px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  word-break: break-word;
+}
+.mon-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.mon-kpis .kpi b {
+  font-size: 13px;
+}
+.mon-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  padding: 10px 12px 12px;
+}
+.chart {
+  min-width: 0;
+  overflow: hidden;
+}
+.chart svg {
+  width: 100%;
+}
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+.chart-head b {
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.chart-head small {
+  color: var(--muted);
+}
+.mon-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+@media (max-width: 700px) {
+  .mon-tables {
+    grid-template-columns: 1fr;
+  }
+  .mon-kpis {
+    grid-template-columns: 1fr 1fr;
+  }
+}

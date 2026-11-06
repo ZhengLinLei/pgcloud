@@ -41,6 +41,8 @@ RUN ln -s /opt/pgcloud/sbin/promote.sh /bin/pgcloud_promote
 RUN ln -s /opt/pgcloud/sbin/redirect.sh /bin/pgcloud_redirect
 # pgcloud_depromote
 RUN ln -s /opt/pgcloud/sbin/depromote.sh /bin/pgcloud_depromote
+# pgcloud_rewind (run in a one-off container while the node is stopped)
+RUN ln -s /opt/pgcloud/sbin/rewind.sh /bin/pgcloud_rewind
 
 # The entrypoint drops privileges to the postgres user (gosu) before generating the
 # configuration, so postgres must own its config and log folders. No sudo needed.

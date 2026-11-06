@@ -1,0 +1,63 @@
+# Local playground for the PgCloud Launcher: the launcher + two fake servers (Docker-in-Docker + SSH).
+#
+#   docker compose -f tools/pgpool-launcher/test/compose.yaml up -d --build
+#   open http://localhost:8080        (admin password: launcher-test)
+#
+# Servers (SSH user root / password pgcloud-test):
+#   srv-a  172.30.0.11
+#   srv-b  172.30.0.12
+#
+# FOR TESTING ONLY: privileged containers, fixed passwords.
+name: pgcloud-launcher-test
+
+services:
+  launcher:
+    build:
+      context: ..
+    image: pgcloud/launcher:dev
+    environment:
+      LAUNCHER_ADMIN_PASSWORD: launcher-test
+    ports:
+      - "8080:8080"
+    volumes:
+      - launcher-data:/data
+    networks:
+      lab:
+        ipv4_address: 172.30.0.5
+
+  srv-a:
+    build:
+      context: .
+      dockerfile: testhost.Dockerfile
+    image: pgcloud/testhost:dev
+    hostname: srv-a
+    privileged: true
+    volumes:
+      - srv-a-docker:/var/lib/docker
+    networks:
+      lab:
+        ipv4_address: 172.30.0.11
+
+  srv-b:
+    build:
+      context: .
+      dockerfile: testhost.Dockerfile
+    image: pgcloud/testhost:dev
+    hostname: srv-b
+    privileged: true
+    volumes:
+      - srv-b-docker:/var/lib/docker
+    networks:
+      lab:
+        ipv4_address: 172.30.0.12
+
+networks:
+  lab:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  launcher-data:
+  srv-a-docker:
+  srv-b-docker:

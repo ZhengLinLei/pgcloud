@@ -8,6 +8,16 @@ if [ -z "$1" ] || [ -z "$2" ]; then
     exit 1
 fi
 
+# The node may have just been (re)started by the failover: wait until PostgreSQL accepts connections
+for i in $(seq 1 60); do
+    pg_isready -q -p "$PGPORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" && break
+    sleep 1
+done
+pg_isready -q -p "$PGPORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" || {
+    echo "PostgreSQL is not accepting connections ... fail"
+    exit 3
+}
+
 # Get role path
 GETROLE_SCRIPT="$PGCDATA/script/getrole.sh"
 
@@ -31,10 +41,11 @@ echo "============================"
 echo -e "PRIMARY_HOST=$1\nPRIMARY_PORT=$2" > $PGDATA/standby.signal
 echo "Creating standby.signal file ... ok"
 
-rm -f $PGDATA/postmaster.pid
+# Never remove postmaster.pid of a running server: pg_ctl would lose track of it and
+# PostgreSQL would keep running as a second primary until it notices the missing lock file.
 rm -f $PGDATA/recovery.conf
 
-echo "Removing postmaster.pid and recovery.conf ... ok"
+echo "Removing recovery.conf ... ok"
 
 # Get replica slot name
 slot=$(cat "$PGDATA/PGC_SLOT" 2>/dev/null || cat "$PGCDATA/conf/PGC_SLOT" 2>/dev/null)
@@ -78,6 +89,6 @@ update_env PRIMARY_PORT "$2"
 echo "Changing PRIMARY_PORT in physical machine .env file to $2 ... ok"
 
 echo "Depromoting to $1:$2 ... ok"
-echo "Restarting to create setup, remember to launch Postgres again. Bye!"
-# Restart to create setup
-su postgres -c "pg_ctl restart"
+echo "Stopping PostgreSQL; it starts again as a replica when the container is started (docker start pgcloud_db)"
+# Clean, fast shutdown. In a container this stops it; the failover command starts it again.
+su postgres -c "pg_ctl stop -m fast -w"

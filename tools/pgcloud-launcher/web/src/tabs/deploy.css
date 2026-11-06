@@ -1,0 +1,86 @@
+.deploy-page {
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) 1fr;
+  gap: 10px;
+  height: 100%;
+}
+.deploy-left {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  overflow: auto;
+  min-height: 0;
+  padding-right: 2px;
+}
+.deploy-console {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+.plan {
+  padding: 6px;
+}
+.plan-step {
+  --c: var(--pg);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.plan-step:last-child {
+  border-bottom: 0;
+}
+.plan-step:hover {
+  background: var(--hover);
+}
+.plan-idx {
+  color: var(--faint);
+  font-weight: 800;
+  font-size: 11px;
+}
+.plan-step .pg-node-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  color: var(--c);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+.history {
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.history-item:hover {
+  background: var(--hover);
+}
+.history-item.on {
+  border-color: var(--accent-dim);
+  background: var(--accent-soft);
+}
+@media (max-width: 1000px) {
+  .deploy-page {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .deploy-console {
+    height: 70vh;
+  }
+}

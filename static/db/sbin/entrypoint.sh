@@ -353,7 +353,12 @@ configuration_setup() {
 	echo "# Slot id: $(cat $PGCDATA/conf/PGC_SLOT)"           			| tee -a $PGCDATA/conf/postgresql.conf
 
 	# Sync rule
-	echo "synchronous_standby_names	 =  '$SYNCHRONOUS_RULE ($SYNCHRONOUS_NAME)'" 	| tee -a $PGCDATA/conf/postgresql.conf
+	# Empty SYNCHRONOUS_NAME = asynchronous replication
+	if [ -n "$SYNCHRONOUS_NAME" ]; then
+		echo "synchronous_standby_names	 =  '$SYNCHRONOUS_RULE ($SYNCHRONOUS_NAME)'" 	| tee -a $PGCDATA/conf/postgresql.conf
+	else
+		echo "synchronous_standby_names	 =  ''" 	| tee -a $PGCDATA/conf/postgresql.conf
+	fi
 	echo -e "\n"                                         						| tee -a $PGCDATA/conf/postgresql.conf
 
 	# Logs

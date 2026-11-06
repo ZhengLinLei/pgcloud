@@ -1,0 +1,528 @@
+import { useEffect, useMemo, useState } from 'react';
+import type { ClusterNode, NodeType, ValidationIssue } from '../../../shared/types';
+import { api, del, formatDuration, patch, post, timeAgo } from '../api';
+import { useStore } from '../store';
+import { CloseIcon, FileIcon, PlayIcon, PlugIcon, RestartIcon, RocketIcon, StopIcon, TerminalIcon, TrashIcon, TYPE_LABEL, TypeIcon } from './icons';
+import { Confirm, Modal, RoleBadge, StatusBadge, Terminal } from './ui';
+
+type FieldKind = 'number' | 'text' | 'bool' | 'select';
+interface FieldDef {
+  key: string;
+  label: string;
+  kind: FieldKind;
+  options?: string[];
+  help?: string;
+}
+
+const FIELDS: Record<NodeType, FieldDef[]> = {
+  postgres: [
+    { key: 'port', label: 'Port', kind: 'number' },
+    { key: 'synchronous', label: 'Synchronous replication (primary)', kind: 'bool', help: 'FIRST 1 (*): commits wait for one replica' },
+    { key: 'maxConnections', label: 'max_connections', kind: 'number' },
+    { key: 'sharedBuffers', label: 'shared_buffers', kind: 'text', help: '25–40% of RAM' },
+    { key: 'workMem', label: 'work_mem', kind: 'text' },
+    { key: 'effectiveCacheSize', label: 'effective_cache_size', kind: 'text', help: '50–75% of RAM' },
+    { key: 'maintenanceWorkMem', label: 'maintenance_work_mem', kind: 'text' },
+    { key: 'weight', label: 'Pgpool load-balance weight', kind: 'number', help: '0 = no read traffic' },
+    { key: 'promoteMinDelay', label: 'Max replay delay to promote (s)', kind: 'number', help: '0 = always promote' },
+  ],
+  pgpool: [
+    { key: 'port', label: 'Port', kind: 'number' },
+    { key: 'pcpPort', label: 'PCP port', kind: 'number' },
+    { key: 'balance', label: 'Load balance reads to replicas', kind: 'bool' },
+    { key: 'numInitChildren', label: 'num_init_children', kind: 'number', help: 'Max concurrent client sessions' },
+    { key: 'maxPool', label: 'max_pool', kind: 'number' },
+    { key: 'healthCheckPeriod', label: 'Health check period (s)', kind: 'number' },
+    { key: 'recoverReplica', label: 'Auto-recover failed replicas', kind: 'bool' },
+    { key: 'wdPort', label: 'Watchdog port', kind: 'number' },
+    { key: 'heartbeatPort', label: 'Heartbeat port', kind: 'number' },
+    { key: 'heartbeatDevice', label: 'Heartbeat device', kind: 'text', help: 'e.g. eth0 (empty = default)' },
+  ],
+  pgbouncer: [
+    { key: 'port', label: 'Port', kind: 'number' },
+    { key: 'poolMode', label: 'Pool mode', kind: 'select', options: ['transaction', 'session', 'statement'] },
+    { key: 'maxClientConn', label: 'max_client_conn', kind: 'number' },
+    { key: 'defaultPoolSize', label: 'default_pool_size', kind: 'number' },
+  ],
+};
+
+type Tab = 'config' | 'ssh' | 'live' | 'files';
+
+export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; issues: ValidationIssue[]; role?: string; onClose: () => void }) {
+  const { live, toast, current } = useStore();
+  const [tab, setTab] = useState<Tab>('config');
+  const nodeLive = live[node.id];
+  const busy = !!current;
+  const [confirm, setConfirm] = useState<null | 'destroy' | 'remove' | 'delete'>(null);
+
+  const action = async (a: string) => {
+    try {
+      await post(`/api/nodes/${node.id}/actions/${a}`);
+      toast(`${a} ${node.name} started — follow it in the Deploy tab`, 'info');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
+
+  return (
+    <aside className="inspector">
+      <div className="inspector-head">
+        <div className="pg-node-icon" style={{ ['--c' as string]: `var(--${node.type === 'postgres' ? 'pg' : node.type === 'pgpool' ? 'pool' : 'bouncer'})` }}>
+          <TypeIcon type={node.type} size={15} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>
+            {node.name} <span className="muted" style={{ fontWeight: 400, fontSize: 10.5 }}>{TYPE_LABEL[node.type]}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+            <StatusBadge status={nodeLive?.status} />
+            <RoleBadge role={nodeLive?.status === 'up' && nodeLive.role ? nodeLive.role : role} />
+          </div>
+        </div>
+        <button className="btn icon ghost" onClick={onClose} aria-label="Close inspector">
+          <CloseIcon />
+        </button>
+      </div>
+      <div className="inspector-tabs">
+        {(['config', 'ssh', 'live', 'files'] as Tab[]).map((t) => (
+          <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+            {t}
+          </button>
+        ))}
+      </div>
+      <div className="inspector-body">
+        {issues.map((i, k) => (
+          <div key={k} className={`issue ${i.level}`}>
+            {i.level === 'error' ? '✖' : '▲'} <span>{i.message}</span>
+          </div>
+        ))}
+
+        {tab === 'config' && <ConfigForm node={node} onDeleted={onClose} />}
+        {tab === 'ssh' && <SshForm node={node} />}
+        {tab === 'live' && <LivePanel node={node} />}
+        {tab === 'files' && <FilesPanel node={node} />}
+
+        <div className="hr" />
+        <div className="label" style={{ marginBottom: 8 }}>
+          Operations {node.deployedAt && <span className="faint">· deployed {timeAgo(node.deployedAt)}</span>}
+        </div>
+        <div className="btn-row">
+          <button className="btn primary" disabled={busy} onClick={() => action('deploy')}>
+            <RocketIcon /> {node.deployedAt ? 'Redeploy' : 'Deploy'}
+          </button>
+          <button className="btn" disabled={busy || !node.deployedAt} onClick={() => action('start')}>
+            <PlayIcon /> Start
+          </button>
+          <button className="btn" disabled={busy || !node.deployedAt} onClick={() => action('stop')}>
+            <StopIcon /> Stop
+          </button>
+          <button className="btn" disabled={busy || !node.deployedAt} onClick={() => action('restart')}>
+            <RestartIcon /> Restart
+          </button>
+          <button className="btn danger" disabled={busy || !node.deployedAt} onClick={() => setConfirm('remove')}>
+            <TrashIcon /> Remove container
+          </button>
+          <button className="btn danger" disabled={busy} onClick={() => setConfirm('destroy')}>
+            <TrashIcon /> Destroy (data)
+          </button>
+        </div>
+      </div>
+      {confirm === 'remove' && (
+        <Confirm
+          title="Remove container"
+          message={
+            <>
+              Stops and removes the <b>{node.name}</b> container. Data volumes and configuration stay on the host; deploy again to recreate it.
+            </>
+          }
+          confirmText="Remove"
+          danger
+          onConfirm={() => action('remove')}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+      {confirm === 'destroy' && (
+        <Confirm
+          title="Destroy node"
+          message={
+            <>
+              Removes the container, <b>its data volume</b> and its configuration directory on <b>{node.address}</b>. This cannot be undone.
+            </>
+          }
+          confirmText="Destroy"
+          danger
+          requireText={node.name}
+          onConfirm={() => action('destroy')}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+    </aside>
+  );
+}
+
+function ConfigForm({ node, onDeleted }: { node: ClusterNode; onDeleted: () => void }) {
+  const { toast } = useStore();
+  const [name, setName] = useState(node.name);
+  const [address, setAddress] = useState(node.address === node.ssh.host ? '' : node.address);
+  const [cfg, setCfg] = useState<Record<string, unknown>>(node.config);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  useEffect(() => {
+    setName(node.name);
+    setAddress(node.address === node.ssh.host ? '' : node.address);
+    setCfg(node.config);
+  }, [node.id, node.name, node.address, node.ssh.host, node.config]);
+
+  const dirty = useMemo(
+    () =>
+      name !== node.name ||
+      address !== (node.address === node.ssh.host ? '' : node.address) ||
+      JSON.stringify(cfg) !== JSON.stringify(node.config),
+    [name, address, cfg, node],
+  );
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await patch(`/api/nodes/${node.id}`, { name, address, config: cfg });
+      toast(`${name} saved`, 'ok');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <label className="field">
+        <span>Name</span>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value.toLowerCase())} />
+        <small>a-z, 0-9, _ · used as application_name and volume name</small>
+      </label>
+      <label className="field">
+        <span>Cluster address</span>
+        <input className="input" placeholder={node.ssh.host || 'same as SSH host'} value={address} onChange={(e) => setAddress(e.target.value)} />
+        <small>IP/hostname other nodes use to reach it (defaults to the SSH host)</small>
+      </label>
+      <div className="hr" />
+      <div className="label" style={{ marginBottom: 10 }}>
+        {TYPE_LABEL[node.type]} settings
+      </div>
+      {FIELDS[node.type].map((f) =>
+        f.kind === 'bool' ? (
+          <label key={f.key} className="check">
+            <input type="checkbox" checked={!!cfg[f.key]} onChange={(e) => setCfg({ ...cfg, [f.key]: e.target.checked })} />
+            <span>{f.label}</span>
+          </label>
+        ) : (
+          <label key={f.key} className="field">
+            <span>{f.label}</span>
+            {f.kind === 'select' ? (
+              <select className="input" value={String(cfg[f.key])} onChange={(e) => setCfg({ ...cfg, [f.key]: e.target.value })}>
+                {f.options!.map((o) => (
+                  <option key={o}>{o}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className="input"
+                type={f.kind === 'number' ? 'number' : 'text'}
+                value={String(cfg[f.key] ?? '')}
+                onChange={(e) => setCfg({ ...cfg, [f.key]: f.kind === 'number' ? Number(e.target.value) : e.target.value })}
+              />
+            )}
+            {f.help && <small>{f.help}</small>}
+          </label>
+        ),
+      )}
+      <div className="btn-row">
+        <button className="btn primary" disabled={!dirty || saving} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button className="btn danger" onClick={() => setConfirmDelete(true)}>
+          <TrashIcon /> Delete node
+        </button>
+      </div>
+      {confirmDelete && (
+        <Confirm
+          title="Delete node"
+          message={
+            <>
+              Removes <b>{node.name}</b> and its links from the topology.
+              {node.deployedAt && (
+                <div className="warn" style={{ marginTop: 8 }}>
+                  It is deployed: its container keeps running on {node.address}. Use “Remove container” or “Destroy” first if you want it gone.
+                </div>
+              )}
+            </>
+          }
+          confirmText="Delete"
+          danger
+          onConfirm={async () => {
+            await del(`/api/nodes/${node.id}`);
+            onDeleted();
+          }}
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function SshForm({ node }: { node: ClusterNode }) {
+  const { toast } = useStore();
+  const [host, setHost] = useState(node.ssh.host);
+  const [port, setPort] = useState(node.ssh.port);
+  const [user, setUser] = useState(node.ssh.user);
+  const [auth, setAuth] = useState(node.ssh.auth);
+  const [sudo, setSudo] = useState(node.ssh.sudo);
+  const [password, setPassword] = useState('');
+  const [privateKey, setPrivateKey] = useState('');
+  const [passphrase, setPassphrase] = useState('');
+  const [test, setTest] = useState<{ ok: boolean; message: string; os?: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    setHost(node.ssh.host);
+    setPort(node.ssh.port);
+    setUser(node.ssh.user);
+    setAuth(node.ssh.auth);
+    setSudo(node.ssh.sudo);
+    setPassword('');
+    setPrivateKey('');
+    setPassphrase('');
+    setTest(null);
+  }, [node.id, node.ssh]);
+
+  const save = async () => {
+    await patch(`/api/nodes/${node.id}`, { ssh: { host, port, user, auth, sudo, password, privateKey, passphrase } });
+    setPassword('');
+    setPrivateKey('');
+    setPassphrase('');
+  };
+
+  return (
+    <div>
+      <div className="row">
+        <label className="field">
+          <span>Host</span>
+          <input className="input" placeholder="10.0.0.11" value={host} onChange={(e) => setHost(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Port</span>
+          <input className="input" type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} />
+        </label>
+      </div>
+      <label className="field">
+        <span>User</span>
+        <input className="input" value={user} onChange={(e) => setUser(e.target.value)} />
+      </label>
+      <div className="field">
+        <span>Authentication</span>
+        <div className="segmented">
+          <button className={auth === 'password' ? 'on' : ''} onClick={() => setAuth('password')}>
+            password
+          </button>
+          <button className={auth === 'key' ? 'on' : ''} onClick={() => setAuth('key')}>
+            private key
+          </button>
+        </div>
+      </div>
+      {auth === 'password' ? (
+        <label className="field">
+          <span>Password</span>
+          <input
+            className="input"
+            type="password"
+            autoComplete="new-password"
+            placeholder={node.ssh.hasPassword ? '•••••••• stored (leave empty to keep)' : ''}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <small>Also used by pgpool for automatic failover recovery</small>
+        </label>
+      ) : (
+        <>
+          <label className="field">
+            <span>Private key (OpenSSH / PEM)</span>
+            <textarea
+              className="input"
+              spellCheck={false}
+              placeholder={node.ssh.hasPrivateKey ? 'key stored (paste a new one to replace it)' : '-----BEGIN OPENSSH PRIVATE KEY-----'}
+              value={privateKey}
+              onChange={(e) => setPrivateKey(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Passphrase</span>
+            <input className="input" type="password" autoComplete="new-password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
+          </label>
+        </>
+      )}
+      <label className="check">
+        <input type="checkbox" checked={sudo} onChange={(e) => setSudo(e.target.checked)} />
+        <span>Run container commands with sudo (passwordless)</span>
+      </label>
+      <div className="btn-row">
+        <button
+          className="btn primary"
+          onClick={() =>
+            save()
+              .then(() => toast('SSH settings saved', 'ok'))
+              .catch((e) => toast((e as Error).message, 'error'))
+          }
+        >
+          Save
+        </button>
+        <button
+          className="btn"
+          disabled={testing}
+          onClick={async () => {
+            setTesting(true);
+            setTest(null);
+            try {
+              await save();
+              setTest(await post(`/api/nodes/${node.id}/test`));
+            } catch (e) {
+              setTest({ ok: false, message: (e as Error).message });
+            } finally {
+              setTesting(false);
+            }
+          }}
+        >
+          <PlugIcon /> {testing ? 'Connecting…' : 'Save & test'}
+        </button>
+      </div>
+      {test && (
+        <div className="test-result" style={{ color: test.ok ? 'var(--accent)' : 'var(--danger)' }}>
+          {test.ok ? '✔ ' : '✖ '}
+          {test.message}
+          {test.os && <div className="muted">{test.os}</div>}
+        </div>
+      )}
+      <p className="faint" style={{ fontSize: 11, marginTop: 14 }}>
+        Credentials are stored encrypted (AES-256-GCM) and never sent back to the browser.
+      </p>
+    </div>
+  );
+}
+
+function LivePanel({ node }: { node: ClusterNode }) {
+  const { live } = useStore();
+  const l = live[node.id];
+  const [logs, setLogs] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const m = l?.metrics ?? {};
+  const rows: Array<[string, string]> = [
+    ['Container', l?.container ?? '—'],
+    ['Latency', l?.latencyMs != null ? `${l.latencyMs} ms` : '—'],
+    ['Last check', l ? timeAgo(l.checkedAt) : '—'],
+    ...Object.entries(m).map(([k, v]) => [k, k === 'uptimeSec' ? formatDuration(v) : v === null ? '—' : String(v)] as [string, string]),
+  ];
+  return (
+    <div>
+      {l?.error && <div className="issue error">✖ <span>{l.error}</span></div>}
+      <table className="table">
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}>
+              <td className="muted">{k}</td>
+              <td className="mono-num" style={{ textAlign: 'right' }}>
+                {v}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {Object.entries(l?.tables ?? {}).map(([name, data]) => (
+        <div key={name} style={{ marginTop: 14 }}>
+          <div className="label" style={{ marginBottom: 6 }}>
+            {name}
+          </div>
+          {data.length === 0 ? (
+            <div className="faint">empty</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    {Object.keys(data[0]).map((k) => (
+                      <th key={k}>{k}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((r, i) => (
+                    <tr key={i}>
+                      {Object.values(r).map((v, j) => (
+                        <td key={j}>{String(v ?? '—')}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ))}
+      <div className="btn-row" style={{ marginTop: 14 }}>
+        <button
+          className="btn"
+          disabled={!node.deployedAt || loading}
+          onClick={async () => {
+            setLoading(true);
+            try {
+              setLogs((await api<{ logs: string }>(`/api/nodes/${node.id}/logs?lines=300`)).logs);
+            } catch (e) {
+              setLogs(`Error: ${(e as Error).message}`);
+            } finally {
+              setLoading(false);
+            }
+          }}
+        >
+          <TerminalIcon /> {loading ? 'Loading…' : 'Container logs'}
+        </button>
+      </div>
+      {logs !== null && (
+        <Modal title={`${node.name} · container logs`} onClose={() => setLogs(null)}>
+          <Terminal lines={logs.split('\n').map((line) => ({ line, level: /error|fatal/i.test(line) ? 'error' : /warn/i.test(line) ? 'warn' : 'info' }))} height="65vh" />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function FilesPanel({ node }: { node: ClusterNode }) {
+  const [files, setFiles] = useState<Record<string, string> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { nodes, edges, settings } = useStore();
+  useEffect(() => {
+    api<{ files: Record<string, string> }>(`/api/nodes/${node.id}/files`)
+      .then((r) => {
+        setFiles(r.files);
+        setError(null);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, [node.id, nodes, edges, settings]);
+  if (error) return <div className="issue error">{error}</div>;
+  if (!files) return <div className="muted">Generating…</div>;
+  return (
+    <div>
+      <p className="muted" style={{ marginTop: 0, fontSize: 11.5 }}>
+        <FileIcon /> Files written to <code>{settings.remoteDir}/{node.name}/</code> on deploy (secrets masked).
+      </p>
+      {Object.entries(files)
+        .filter(([k]) => !k.endsWith('.keep'))
+        .map(([path, content]) => (
+          <div key={path} style={{ marginBottom: 12 }}>
+            <div className="label" style={{ marginBottom: 5 }}>
+              {path}
+            </div>
+            <Terminal lines={content.trim().split('\n').map((line) => ({ line, level: 'info' }))} />
+          </div>
+        ))}
+    </div>
+  );
+}

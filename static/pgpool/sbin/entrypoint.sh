@@ -14,7 +14,7 @@ for var in POSTGRES_PASSWORD REPLICA_PASS PCP_PASS; do
 done
 
 pglog () {
-    echo $@
+    echo "$*"
     printf '%s  |  %s\n' "$(date)" "$@" >> $PGCDATA/log/pgcloud.log
 }
 
@@ -142,12 +142,12 @@ else
         pglog "heartbeat_device$i   = $NODE_HEARTBEAT_DEVICE"
         pglog ""
 
-        echo "hostname$i           = $NODE_PGPOOL_HOST"         >> $CONF_BASE_PATH/pgpool.conf
+        echo "hostname$i           = '$NODE_PGPOOL_HOST'"         >> $CONF_BASE_PATH/pgpool.conf
         echo "wd_port$i            = $NODE_WD_PORT"             >> $CONF_BASE_PATH/pgpool.conf
         echo "pgpool_port$i        = $NODE_PGPOOL_PORT"         >> $CONF_BASE_PATH/pgpool.conf
-        echo "heartbeat_hostname$i = $NODE_PGPOOL_HOST"         >> $CONF_BASE_PATH/pgpool.conf
+        echo "heartbeat_hostname$i = '$NODE_PGPOOL_HOST'"         >> $CONF_BASE_PATH/pgpool.conf
         echo "heartbeat_port$i     = $NODE_HEARTBEAT_PORT"      >> $CONF_BASE_PATH/pgpool.conf
-        echo "heartbeat_device$i   = $NODE_HEARTBEAT_DEVICE"    >> $CONF_BASE_PATH/pgpool.conf 
+        echo "heartbeat_device$i   = '$NODE_HEARTBEAT_DEVICE'"    >> $CONF_BASE_PATH/pgpool.conf 
         echo ""                                                 >> $CONF_BASE_PATH/pgpool.conf
             
         

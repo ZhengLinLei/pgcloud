@@ -7,9 +7,10 @@ Copied to `/opt/pgcloud` in the `pgcloud_db` image. Build and run instructions a
 | File | Command | Description |
 |---|---|---|
 | `entrypoint.sh` | — | Container entrypoint, based on the official `postgres` image entrypoint. Starts as root, switches to `postgres` (`gosu`), then initializes a **primary** (`initdb`, database, replication role, config) or a **replica** (`pg_basebackup` + replication slot). Checks that passwords are not `change_me`. |
-| `promote.sh` | `pgcloud_promote [new_ip new_port old_ip old_port]` | Promotes a replica to primary. First checks the WAL replay delay against `PROMOTE_MIN_DELAY`, then runs `pg_promote()` (falls back to `pg_ctl promote`). |
+| `promote.sh` | `pgcloud_promote [new_ip new_port old_ip old_port]` | Promotes a replica to primary. First checks the WAL replay delay against `PROMOTE_MIN_DELAY`, then runs `pg_promote()` (falls back to `pg_ctl promote`). Afterwards it disables synchronous replication on the new primary, because with no standby connected every commit would wait forever. Re-enable it once replicas are back (redeploy, or `ALTER SYSTEM SET synchronous_standby_names`). |
 | `redirect.sh` | `pgcloud_redirect <new_ip> <new_port> [old_ip old_port]` | Makes a replica follow a new primary: creates its slot there, updates `primary_conninfo` / `primary_slot_name` and reloads. Also updates `PRIMARY_HOST`/`PRIMARY_PORT` in the mounted `.env`, if there is one. |
-| `depromote.sh` | `pgcloud_depromote <new_ip> <new_port> [old_ip old_port]` | Turns a former primary into a replica of the new primary (`standby.signal`, conninfo, slot), then restarts Postgres. |
+| `rewind.sh` | `pgcloud_rewind <new_ip> <new_port>` | **Recommended way to bring a former primary back.** With the node stopped, runs `pg_rewind` against the new primary, keeps the node's own slot id and writes the standby configuration. It runs in a one-off container that shares the node's volumes: `docker stop -t 60 pgcloud_db && docker run --rm --network host --volumes-from pgcloud_db --entrypoint pgcloud_rewind <image> <new_ip> <new_port> && docker start pgcloud_db`. |
+| `depromote.sh` | `pgcloud_depromote <new_ip> <new_port> [old_ip old_port]` | Legacy alternative without `pg_rewind`: writes the standby configuration and stops PostgreSQL cleanly (the container stops; start it again). Only works if the old primary has no WAL beyond the promotion point. |
 
 PgPool's `failover.sh` calls the `pgcloud_*` commands over SSH. They must be run as root (`docker exec`).
 

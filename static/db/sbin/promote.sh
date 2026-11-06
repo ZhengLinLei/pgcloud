@@ -66,3 +66,13 @@ iRet=$(psql -At -U $POSTGRES_USER -d $POSTGRES_DB -p $PGPORT -c "SELECT pg_promo
 
 
 echo "Promotion finished ... ok"
+
+# The promoted node inherits synchronous_standby_names from the old primary. With no standby
+# connected yet every commit would wait forever, so run asynchronous until replicas are back.
+# Re-enable it afterwards (redeploy from the launcher, or ALTER SYSTEM SET synchronous_standby_names).
+sync=$(psql -At -U $POSTGRES_USER -d $POSTGRES_DB -p $PGPORT -c "SHOW synchronous_standby_names;")
+if [ -n "$sync" ]; then
+    psql -At -U $POSTGRES_USER -d $POSTGRES_DB -p $PGPORT -c "ALTER SYSTEM SET synchronous_standby_names = '';" >/dev/null \
+        && psql -At -U $POSTGRES_USER -d $POSTGRES_DB -p $PGPORT -c "SELECT pg_reload_conf();" >/dev/null \
+        && echo "Synchronous replication ($sync) disabled on the new primary ... ok"
+fi
