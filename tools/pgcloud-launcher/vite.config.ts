@@ -5,10 +5,10 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// Demo output: the repository's doc/ folder, which also holds the book, images and diagrams.
+// Demo output: the repository's docs/ folder, which also holds the book, images and diagrams.
 const DEMO_OUT = path.resolve(here, '../../docs');
 
-/** Remove only the files of the previous demo build; everything else in doc/ is kept. */
+/** Remove only the files of the previous demo build; everything else in docs/ is kept. */
 function cleanDemoOutput(): Plugin {
   let outDir = DEMO_OUT; // the resolved one, in case --outDir is passed on the command line
   return {
@@ -27,8 +27,8 @@ function cleanDemoOutput(): Plugin {
 // The SPA lives in web/ and is served by the Fastify backend in production.
 // In development (npm run dev:web) API and WebSocket calls are proxied to the backend.
 // `vite build --mode demo` (npm run build:demo) builds a front-end only demo with simulated data and a
-// DEMO watermark into doc/ (index.html, assets/, logo.png, favicon.png), with relative paths so it can be
-// opened from any static host. doc/ is not emptied: only the previous demo files are replaced.
+// DEMO watermark into docs/ (index.html, assets/, logo.png, favicon.png), with relative paths so it can be
+// opened from any static host. docs/ is not emptied: only the previous demo files are replaced.
 export default defineConfig(({ mode }) => ({
   root: 'web',
   plugins: mode === 'demo' ? [react(), cleanDemoOutput()] : [react()],

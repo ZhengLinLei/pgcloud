@@ -72,7 +72,7 @@ export const TYPE_COLOR: Record<NodeType, string> = {
   pgbouncer: 'var(--bouncer)',
 };
 
-/** PgCloud elephant (doc/img/pgcloud_small_logo.png) used as a CSS mask, so it follows the text colour in both themes. */
+/** PgCloud elephant (docs/img/pgcloud_small_logo.png) used as a CSS mask, so it follows the text colour in both themes. */
 export const Logo = ({ size = 22 }: P) => (
   <span className="brand-logo" role="img" aria-label="PgCloud" style={{ width: size * 1.15, height: size }} />
 );

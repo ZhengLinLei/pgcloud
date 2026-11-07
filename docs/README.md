@@ -1,4 +1,4 @@
-# doc/
+# docs/
 
 Documentation assets for PgCloud.
 

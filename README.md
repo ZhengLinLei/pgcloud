@@ -2,7 +2,7 @@
 <h5 align="center" style="font-family: monospace;">PgCloud</h5>
 <br>
 <p align="center">
-    <img src="doc/img/pgcloud_small_logo_bgWhite_rounded.png" width="80px">
+    <img src="docs/img/pgcloud_small_logo_bgWhite_rounded.png" width="80px">
 </p>
 <br><br>
 
@@ -95,7 +95,7 @@ Two-tier only (without PgBouncer): `docker compose up -d db0 db1 db2 pgpool`.
 <br>
 <p align="justify" style="font-family: monospace;">
     <p align="center">
-        <img align="center" src="doc/readme/1_three_layer_diagram.png" width="400px">
+        <img align="center" src="docs/readme/1_three_layer_diagram.png" width="400px">
     </p>
     <br><br>
     <p align="justify">
@@ -112,7 +112,7 @@ Two-tier only (without PgBouncer): `docker compose up -d db0 db1 db2 pgpool`.
 <br>
 <p align="justify" style="font-family: monospace;">
     <p align="center">
-        <img align="center" src="doc/readme/2_two_layer_diagram.png" width="400px">
+        <img align="center" src="docs/readme/2_two_layer_diagram.png" width="400px">
     </p>
     <br><br>
     <p align="justify">
@@ -134,8 +134,8 @@ By default the system is enabled to launch this architecture.
 ### Two-tier diagram
 <br>
 <p align="center">
-    <img src="doc/readme/3_three_layer_diagram.png" width="45%">
-    <img src="doc/readme/4_three_layer_diagram.png" width="45%">
+    <img src="docs/readme/3_three_layer_diagram.png" width="45%">
+    <img src="docs/readme/4_three_layer_diagram.png" width="45%">
 </p>
 <p align="justify">
     <ul>
@@ -153,7 +153,7 @@ By default the system is enabled to launch this architecture.
 ### Three-tier diagram
 <br>
 <p align="center">
-    <img src="doc/readme/5_two_layer_diagram.png" width="500px">
+    <img src="docs///readme/5_two_layer_diagram.png" width="500px">
 </p>
 <p align="justify">
     With a three-tier architecture we have better consistency between nodes, this way if PgBouncer were to fail we could replace it with a PgPool gate, losing the capacity offered by PgBouncer but obtaining more availability. With this we are able to create a distributed system that offers load balancing and connection caching for fast management.
@@ -166,7 +166,7 @@ By default the system is enabled to launch this architecture.
     You can also use the system where you omit the load balancing layer, that is, use PgBouncer with Postgres. This architecture is not the most common but it does offer quite a few advantages if you only require these two modules.
 </p>
 <p align="center">
-    <img src="doc/readme/6_two_layer_diagram_other.png" width="400px">
+    <img src="docs/readme/6_two_layer_diagram_other.png" width="400px">
 </p>
 <p align="justify">
     PgBouncer is an optimal choice for efficiently pooling database connections, especially when your system needs connection caching rather than load balancing. Unlike PgPool, which offers additional features like load balancing, PgBouncer focuses solely on connection pooling. This makes it lightweight, with lower memory consumption and minimal configuration, ideal for handling high connection rates while maintaining a stable database environment.
@@ -174,7 +174,7 @@ By default the system is enabled to launch this architecture.
     An example using this layer is:
 </p>
 <p align="center">
-    <img src="doc/readme/7_two_layer_diagram_other.png" width="400px">
+    <img src="docs/readme/7_two_layer_diagram_other.png" width="400px">
 </p>
 <br><br><br><br><br><br><br>
 <p align="center" style="font-family: monospace;">...</p>
