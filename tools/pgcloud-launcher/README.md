@@ -113,6 +113,16 @@ Publishing a GitHub release runs [`.github/workflows/release-images.yml`](../../
 
 A release tagged `v1.2.3` produces the tags `1.2.3`, `1.2` and `latest` (`latest` is skipped for pre-releases). The repository needs the secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access token with *Read & Write* scope). The workflow can also be run by hand (*Actions → Publish release images → Run workflow*) for an existing tag.
 
+## Web demo
+
+`npm run build:demo` builds a front-end only version of the UI into [`doc/`](../../doc/) (`index.html`, `assets/`, `logo.png`, `favicon.png`), with a **DEMO** watermark and a banner. The rest of `doc/` (book, images, diagrams) is kept: each build only replaces the previous demo files. It is for illustration only:
+
+- the API and the live feed are simulated in the browser from [`web/src/demo/snapshot.json`](web/src/demo/snapshot.json), a snapshot recorded from the playground cluster (secrets replaced by `********`);
+- the topology can be edited in memory; deploying, node actions, SSH tests and uploads answer "Not available in the demo";
+- assets use relative paths, so the folder works from any static host (GitHub Pages, `python3 -m http.server -d doc`). Browsers do not run it from `file://`.
+
+The normal build (`npm run build`) does not contain the demo code.
+
 ## Development
 
 ```bash

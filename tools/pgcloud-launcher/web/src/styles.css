@@ -654,3 +654,49 @@ textarea.input {
     display: none;
   }
 }
+
+/* demo build only (npm run build:demo) */
+.demo-watermark {
+  position: fixed;
+  inset: -50%;
+  z-index: 300;
+  pointer-events: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-content: space-around;
+  justify-items: center;
+  row-gap: 120px;
+  transform: rotate(-24deg);
+  user-select: none;
+}
+.demo-watermark span {
+  font-size: 88px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  color: var(--text);
+  opacity: 0.06;
+}
+.demo-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 301;
+  max-width: calc(100vw - 24px);
+  padding: 6px 12px;
+  background: var(--panel);
+  border: 1px solid var(--warn);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+.demo-banner b {
+  color: var(--warn);
+  letter-spacing: 0.12em;
+  margin-right: 6px;
+}
+.demo-banner a {
+  color: var(--accent-dim);
+  margin-left: 4px;
+}

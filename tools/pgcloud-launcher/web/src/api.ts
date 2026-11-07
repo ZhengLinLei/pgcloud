@@ -8,6 +8,11 @@ export class ApiError extends Error {
 }
 
 export async function api<T = unknown>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  if (import.meta.env.MODE === 'demo') {
+    // Demo build: the API is simulated in the browser (removed from the normal build)
+    const { demoApi } = await import('./demo/mock');
+    return demoApi<T>(path, init);
+  }
   const res = await fetch(path, {
     method: init.method ?? (init.body !== undefined ? 'POST' : 'GET'),
     headers: init.body !== undefined && !(init.body instanceof FormData) ? { 'content-type': 'application/json' } : undefined,

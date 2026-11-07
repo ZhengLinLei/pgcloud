@@ -91,6 +91,10 @@ export function SettingsTab() {
   };
 
   const uploadFile = (file: File) => {
+    if (import.meta.env.MODE === 'demo') {
+      toast('Not available in the demo: this page only illustrates the launcher.', 'error');
+      return;
+    }
     const fd = new FormData();
     fd.append('file', file);
     const xhr = new XMLHttpRequest();

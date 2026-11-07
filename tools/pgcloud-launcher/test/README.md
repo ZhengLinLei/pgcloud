@@ -43,7 +43,7 @@ bash tools/pgcloud-launcher/test/load-images.sh
 Generate load through PgBouncer. The password is in **Settings → Superuser password → 👁**:
 
 ```bash
-docker run --rm -it --network pgcloud-launcher-test_lab -e PGPASSWORD='<password>' postgres:16 \
+docker run --rm -it --network pgcloud-launcher-test_lab -e PGPASSWORD='<password>' postgres:18 \
   bash -c 'pgbench -h 172.30.0.11 -p 6432 -U u_pgcloud -i -s 5 db_pgcloud && pgbench -h 172.30.0.11 -p 6432 -U u_pgcloud -c 8 -T 300 -P 10 db_pgcloud'
 ```
 

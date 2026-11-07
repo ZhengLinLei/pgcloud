@@ -1,8 +1,11 @@
-# Using postgresql 16 with own entrypoint
-# This image is used to create a PostgreSQL 16 image with own entrypoint
+# Using postgresql 18 with own entrypoint
+# This image is used to create a PostgreSQL 18 image with own entrypoint
 # The entrypoint will create the database, user and password
 # The entrypoint will also start the PostgreSQL service
-FROM postgres:16
+FROM postgres:18
+
+# PostgreSQL 18 images default PGDATA to /var/lib/postgresql/18/docker; PgCloud keeps its own path
+ENV PGDATA=/opt/pgdata
 
 # Install and update
 RUN apt update

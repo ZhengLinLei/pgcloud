@@ -9,6 +9,7 @@ import { MonitorTab } from './tabs/Monitor';
 import { DeployTab } from './tabs/Deploy';
 import { EventsTab } from './tabs/Events';
 import { SettingsTab } from './tabs/Settings';
+import { DEMO, DemoWatermark } from './demo/Watermark';
 
 type Tab = 'topology' | 'monitor' | 'deploy' | 'events' | 'settings';
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -198,9 +199,16 @@ export function App() {
     return () => window.removeEventListener('pgl:unauthorized', onUnauthorized);
   }, []);
   if (auth === null) return null;
-  if (!auth) return <Login onLogin={() => setAuth(true)} />;
+  if (!auth)
+    return (
+      <>
+        <Login onLogin={() => setAuth(true)} />
+        {DEMO && <DemoWatermark />}
+      </>
+    );
   return (
     <StoreProvider>
+      {DEMO && <DemoWatermark />}
       <Shell
         onLogout={async () => {
           await post('/api/logout').catch(() => undefined);

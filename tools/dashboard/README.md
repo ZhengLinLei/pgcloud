@@ -44,7 +44,7 @@ The compose demo does not publish the Postgres ports, so run the dashboard from 
 
 ```bash
 docker run --rm -it --network pgcloud_default -e DEBIAN_FRONTEND=noninteractive \
-  -v "$PWD":/dash -w /dash postgres:16 \
+  -v "$PWD":/dash -w /dash postgres:18 \
   bash -c 'apt-get update -qq && apt-get install -y -qq bc bsdextrautils >/dev/null && ./cluster.sh'
 ```
 

@@ -1,12 +1,20 @@
 # From ubuntu 24.04
 FROM ubuntu:24.04
 
-RUN apt-get update
+# Pgpool-II and the PostgreSQL 18 client from the official PostgreSQL repository (PGDG):
+# Ubuntu's own pgpool2 (4.3) does not support PostgreSQL 18.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update
 RUN apt-get install -y                  \
                     pgpool2             \
                     vim                 \
-                    postgresql-client   \
-                    netcat-openbsd              \
+                    postgresql-client-18 \
+                    netcat-openbsd      \
                     cronolog            \
                     openssh-client      \
                     sshpass

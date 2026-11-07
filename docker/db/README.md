@@ -1,6 +1,6 @@
 # docker/db — PostgreSQL node
 
-Image based on `postgres:16` with PgCloud's own entrypoint ([`static/db/sbin/entrypoint.sh`](../../static/db/sbin/entrypoint.sh)). The same image runs as **primary** or as **streaming replica**, depending on `NODE_ROLE`.
+Image based on `postgres:18` (PostgreSQL 18, supported until November 2030) with PgCloud's own entrypoint ([`static/db/sbin/entrypoint.sh`](../../static/db/sbin/entrypoint.sh)). The same image runs as **primary** or as **streaming replica**, depending on `NODE_ROLE`.
 
 ## Usage
 

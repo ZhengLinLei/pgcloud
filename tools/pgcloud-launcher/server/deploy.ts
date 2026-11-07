@@ -268,7 +268,7 @@ async function deployNode(node: ClusterNode, log: Logger): Promise<void> {
       log.line(`Wrote ${path.posix.join(dir, rel)}`);
     }
 
-    await s.exec(`${rt} rm -f ${CONTAINER_NAME[node.type]} >/dev/null 2>&1`, { sudo: true });
+    await s.exec(`${rt} rm -f -v ${CONTAINER_NAME[node.type]} >/dev/null 2>&1`, { sudo: true });
     const hasLocaltime = (await s.exec('test -f /etc/localtime')).code === 0;
     const cmd = runCommand(rt, node, dir, ref, hasLocaltime);
     log.line(cmd.replace(/--env-file \S+/, '--env-file …'), 'cmd');
@@ -290,8 +290,8 @@ async function containerAction(node: ClusterNode, action: Exclude<NodeAction, 'd
       await s.run(`${rt} ${action} ${name}`, { sudo: true, onData: log.stream() });
       if (action !== 'stop') await waitHealthy(s, rt, node, log, 120);
     } else {
-      log.line(`${rt} rm -f ${name}`, 'cmd');
-      await s.exec(`${rt} rm -f ${name}`, { sudo: true, onData: log.stream() });
+      log.line(`${rt} rm -f -v ${name}`, 'cmd');
+      await s.exec(`${rt} rm -f -v ${name}`, { sudo: true, onData: log.stream() });
       if (action === 'destroy') {
         if (node.type === 'postgres') {
           log.line(`${rt} volume rm pgcloud_${node.name}_data`, 'cmd');

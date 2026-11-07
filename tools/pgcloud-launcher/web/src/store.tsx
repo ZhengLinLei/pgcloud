@@ -102,6 +102,49 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let ws: WebSocket | null = null;
     let retry: number | null = null;
     let closed = false;
+    const onMessage = (msg: WsMessage) => {
+      switch (msg.type) {
+        case 'live':
+          setState((s) => ({ ...s, live: msg.nodes }));
+          break;
+        case 'log':
+          setLogs((prev) => {
+            const list = prev[msg.deploymentId] ?? [];
+            const next = [...list, { line: msg.line, level: msg.level ?? 'info' }];
+            return { ...prev, [msg.deploymentId]: next.length > 3000 ? next.slice(-3000) : next };
+          });
+          break;
+        case 'deployment':
+          setState((s) => {
+            const others = s.deployments.filter((d) => d.id !== msg.deployment.id);
+            return {
+              ...s,
+              deployments: [msg.deployment, ...others].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
+              current: msg.deployment.status === 'running' ? msg.deployment : s.current?.id === msg.deployment.id ? null : s.current,
+            };
+          });
+          break;
+        case 'event':
+          setState((s) => ({ ...s, events: [msg.event, ...s.events].slice(0, 500) }));
+          break;
+        case 'topology':
+          scheduleRefresh();
+          break;
+      }
+    };
+    if (import.meta.env.MODE === 'demo') {
+      // Demo build: simulated live feed instead of the WebSocket
+      let unsubscribe: (() => void) | null = null;
+      void import('./demo/mock').then((m) => {
+        if (closed) return;
+        unsubscribe = m.subscribe(onMessage);
+        setConnected(true);
+      });
+      return () => {
+        closed = true;
+        unsubscribe?.();
+      };
+    }
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -114,37 +157,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (e.code === 4401) window.dispatchEvent(new CustomEvent('pgl:unauthorized'));
         if (!closed) retry = window.setTimeout(connect, 2000);
       };
-      ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data as string) as WsMessage;
-        switch (msg.type) {
-          case 'live':
-            setState((s) => ({ ...s, live: msg.nodes }));
-            break;
-          case 'log':
-            setLogs((prev) => {
-              const list = prev[msg.deploymentId] ?? [];
-              const next = [...list, { line: msg.line, level: msg.level ?? 'info' }];
-              return { ...prev, [msg.deploymentId]: next.length > 3000 ? next.slice(-3000) : next };
-            });
-            break;
-          case 'deployment':
-            setState((s) => {
-              const others = s.deployments.filter((d) => d.id !== msg.deployment.id);
-              return {
-                ...s,
-                deployments: [msg.deployment, ...others].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
-                current: msg.deployment.status === 'running' ? msg.deployment : s.current?.id === msg.deployment.id ? null : s.current,
-              };
-            });
-            break;
-          case 'event':
-            setState((s) => ({ ...s, events: [msg.event, ...s.events].slice(0, 500) }));
-            break;
-          case 'topology':
-            scheduleRefresh();
-            break;
-        }
-      };
+      ws.onmessage = (ev) => onMessage(JSON.parse(ev.data as string) as WsMessage);
     };
     connect();
     return () => {

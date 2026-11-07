@@ -1,6 +1,6 @@
 # docker/pgpool — Pgpool-II node
 
-Image based on `ubuntu:24.04` with the `pgpool2` package (4.3). It provides load balancing between the PostgreSQL nodes, health checks, a watchdog cluster of several PgPool nodes, and automatic failover through [`static/pgpool/sbin/failover.sh`](../../static/pgpool/sbin/failover.sh).
+Image based on `ubuntu:24.04` with Pgpool-II 4.7 and the PostgreSQL 18 client from the official PostgreSQL apt repository (PGDG); Ubuntu's own `pgpool2` (4.3) does not support PostgreSQL 18. It provides load balancing between the PostgreSQL nodes, health checks, a watchdog cluster of several PgPool nodes, and automatic failover through [`static/pgpool/sbin/failover.sh`](../../static/pgpool/sbin/failover.sh).
 
 ## Usage
 

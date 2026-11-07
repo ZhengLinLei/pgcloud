@@ -8,7 +8,7 @@ name: Publish release images
 #   DOCKERHUB_TOKEN     Docker Hub access token with Read & Write scope
 #
 # Published images (<user> = DOCKERHUB_USERNAME):
-#   <user>/pgcloud-db         PostgreSQL 16 node        (docker/db/Dockerfile)
+#   <user>/pgcloud-db         PostgreSQL 18 node        (docker/db/Dockerfile)
 #   <user>/pgcloud-pgpool     Pgpool-II node            (docker/pgpool/Dockerfile)
 #   <user>/pgcloud-pgbouncer  PgBouncer node            (docker/pgbouncer/Dockerfile)
 #   <user>/pgcloud-launcher   PgCloud Launcher web app  (tools/pgcloud-launcher/Dockerfile)

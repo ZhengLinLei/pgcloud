@@ -4,7 +4,7 @@ Build and run scripts for each PgCloud node type. Use these to deploy **one node
 
 | Folder | Image | Purpose |
 |---|---|---|
-| [`db/`](db/) | `pgcloud_db` | PostgreSQL 16 node (primary or streaming replica) |
+| [`db/`](db/) | `pgcloud_db` | PostgreSQL 18 node (primary or streaming replica) |
 | [`pgpool/`](pgpool/) | `pgcloud_pool` | Pgpool-II: load balancing, health checks, failover |
 | [`pgbouncer/`](pgbouncer/) | `pgcloud_bouncer` | PgBouncer: connection pooling |
 
