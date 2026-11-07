@@ -48,5 +48,10 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 
 export function randomToken(bytes = 32): string {
-  return crypto.randomBytes(bytes).toString('base64url');
+  // Never start with "-": the token is also used as a password, and command line tools
+  // (pg_enc, pg_md5...) would read a leading "-" as an option.
+  for (;;) {
+    const token = crypto.randomBytes(bytes).toString('base64url');
+    if (!token.startsWith('-')) return token;
+  }
 }

@@ -28,7 +28,7 @@
     </a>
     &emsp;    
     <a>
-        <img src="https://img.shields.io/badge/version-1.0.0-brightgreen" alt="Version" />
+        <img src="https://img.shields.io/badge/version-1.0.1-brightgreen" alt="Version" />
     </a>
 </p>
 <br>
@@ -45,13 +45,38 @@
 
 ## Quick start
 
-Requirements: Docker with the Compose plugin (`docker compose version`).
+Get the launcher from docker:
+
+````
+docker pull zhenglinlei/pgcloud-launcher
+````
+
+Or use the scripts in the repository root (bash, macOS or Linux):
 
 ```bash
 git clone https://github.com/ZhengLinLei/pgcloud.git
 cd pgcloud
+./RUN.sh                    # starts the launcher from Docker Hub on http://localhost:8080
+```
+
+| Script | What it does |
+|---|---|
+| `./BUILD.sh [launcher db pgpool pgbouncer]` | Builds the images on this machine (all 4 by default), tagged `zhenglinlei/pgcloud-<name>:<version>` and `:latest`. |
+| `./RUN.sh` | Starts the launcher: from Docker Hub, or `--local` for the image from `./BUILD.sh`. `--logs`, `--stop`, `-p <port>`, `--password <pw>`. |
+| `./RUN.dev.sh` | Playground: 3 simulated servers (`172.30.0.11-13`, SSH `root` / `pgcloud-test`) and the launcher built from this checkout. `--servers`, `--stop`, `--reset`. |
+| `./EXPORT.sh tar` | Saves the images to `dist/*.tar.gz` (the nodes archive can be uploaded in the launcher for air-gapped servers). |
+| `./EXPORT.sh hub` | Builds for `linux/amd64` + `linux/arm64` and pushes to Docker Hub with the tags `<version>`, `<major.minor>` and `latest`. |
+| `./CLEAN.sh` | Removes build leftovers; `--dev`, `--images`, `--launcher [--data]`, `--all`, `-n` (dry run). |
+
+Every script has `--help`. Optional settings in `.env`: `PGCLOUD_HUB` (Docker Hub namespace, default `zhenglinlei`), `PGCLOUD_VERSION`, `LAUNCHER_PORT`, `LAUNCHER_ADMIN_PASSWORD`.
+
+To try a whole cluster on one machine without the launcher:
+
+Requirements: Docker with the Compose plugin (`docker compose version`).
+
+```bash
 cp .env.example .env        # then edit .env and set real passwords
-docker compose up -d --build
+docker compose -f compose.dev.yml up -d --build
 ```
 
 This starts a full three-tier cluster on one machine:
@@ -72,17 +97,17 @@ psql -h localhost -p 6432 -U u_pgcloud db_pgcloud
 Useful commands:
 
 ```bash
-docker compose ps                                   # health of every node
-docker compose logs -f pgpool                       # follow logs
-docker compose exec pgpool ./script/status.sh       # pgpool view of the nodes
-docker compose exec db0 ./script/cluster.sh         # replication status on the primary
-docker compose down                                 # stop (keeps data)
-docker compose down -v                              # stop and delete all data
+docker compose -f compose.dev.yml ps                  # health of every node
+docker compose -f compose.dev.yml logs -f pgpool      # follow logs
+docker compose -f compose.dev.yml exec pgpool ./script/status.sh   # pgpool view of the nodes
+docker compose -f compose.dev.yml exec db0 ./script/cluster.sh     # replication status on the primary
+docker compose -f compose.dev.yml down                # stop (keeps data)
+docker compose -f compose.dev.yml down -v             # stop and delete all data
 ```
 
-Two-tier only (without PgBouncer): `docker compose up -d db0 db1 db2 pgpool`.
+Two-tier only (without PgBouncer): `docker compose -f compose.dev.yml up -d db0 db1 db2 pgpool`.
 
-> **Note:** `compose.yaml` runs every node on a single host, which is ideal for development and evaluation. For production, run each node on its own machine with the scripts in `docker/<service>/` (copy `.env.example` to `.env` in each folder) — see the [Wiki](https://github.com/ZhengLinLei/pgcloud/wiki) and the [Book](./docs/wiki).
+> **Note:** `compose.dev.yml` runs every node on a single host, which is ideal for development and evaluation. For production, run each node on its own machine with the scripts in `docker/<service>/` (copy `.env.example` to `.env` in each folder) — see the [Wiki](https://github.com/ZhengLinLei/pgcloud/wiki) and the [Book](./docs/wiki).
 
 <br><br>
 ## What does PgCloud have?

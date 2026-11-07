@@ -1,5 +1,7 @@
 # tools/pgcloud-launcher/test — local playground
 
+> Shortcut from the repository root: `./RUN.dev.sh` starts this playground (`--servers`, `--stop`, `--reset`, see `./RUN.dev.sh --help`).
+
 Run the launcher against two fake servers on your machine, deploy a real cluster and test failover.
 
 | Container | Address | Access |

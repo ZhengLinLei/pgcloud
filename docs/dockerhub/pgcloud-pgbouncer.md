@@ -5,7 +5,7 @@
 > **To use the project, download the launcher:** [`zhenglinlei/pgcloud-launcher`](https://hub.docker.com/r/zhenglinlei/pgcloud-launcher). It is a web app that lets you draw the cluster, deploys these images to your servers over SSH and monitors them in real time:
 >
 > ```bash
-> docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.0
+> docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.1
 > ```
 >
 > Source code, manual and book: https://github.com/ZhengLinLei/pgcloud
@@ -21,7 +21,7 @@ PgBouncer 1.23.1 (compiled from source on Red Hat UBI 9) with PgCloud's configur
 - Optional separate read-write and read-only pools.
 - Admin console for pool, client and server statistics.
 
-Tags: `1.0.0`, `1.0`, `latest`. Platforms: `linux/amd64`, `linux/arm64`.
+Tags: `1.0.1`, `1.0.0`, `1.0`, `latest`. Platforms: `linux/amd64`, `linux/arm64`.
 
 ## Run it by hand
 
@@ -31,7 +31,7 @@ The launcher writes all of this for you. To run a node manually, create an `.env
 docker run -d --name pgcloud_bouncer --restart unless-stopped --network host \
   --env-file .env \
   -v "$PWD/.env":/opt/pgcloud/.env \
-  zhenglinlei/pgcloud-pgbouncer:1.0.0
+  zhenglinlei/pgcloud-pgbouncer:1.0.1
 ```
 
 Applications then connect to port `6432`:

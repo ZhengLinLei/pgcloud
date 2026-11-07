@@ -23,18 +23,18 @@ A web application to **design, deploy and monitor** PgCloud clusters visually.
 From the repository root (the PgCloud sources are bundled in the image):
 
 ```bash
-docker build -t pgcloud/launcher:1.0.0 -f tools/pgcloud-launcher/Dockerfile .
+docker build -t pgcloud/launcher:1.0.1 -f tools/pgcloud-launcher/Dockerfile .
 docker run -d --name pgcloud-launcher \
   -p 8080:8080 \
   -v pgcloud-launcher:/data \
-  pgcloud/launcher:1.0.0
+  pgcloud/launcher:1.0.1
 docker logs pgcloud-launcher     # prints the generated admin password
 ```
 
 Or use the published image (built by [`.github/workflows/release-images.yml`](../../.github/workflows/release-images.yml) on every GitHub release):
 
 ```bash
-docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.0
+docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.1
 ```
 
 Open <http://localhost:8080>. The admin password is also saved in `/data/admin-password.txt`. You can change it in **Settings**, or fix it with `-e LAUNCHER_ADMIN_PASSWORD=...`.
@@ -60,7 +60,7 @@ The launcher must reach every server over **SSH** (deployment) and over the **Po
 
 1. **Settings** → choose the image source:
    - **build** (default): the launcher copies the bundled PgCloud sources to each server over SFTP and runs `docker build` / `podman build` there. Images are labelled with a hash of their sources and rebuilt only when they change. The first build takes a few minutes and the servers need Internet access.
-   - **registry**: `docker pull <registry>/<name>:<tag>` on each server. Selecting it fills in the official images on Docker Hub ([`zhenglinlei`](https://hub.docker.com/u/zhenglinlei)): registry `docker.io/zhenglinlei`, names `pgcloud-db`, `pgcloud-pgpool`, `pgcloud-pgbouncer`, and the launcher version as tag (`1.0.0`). Change them to use your own registry; *Use official images* restores the defaults.
+   - **registry**: `docker pull <registry>/<name>:<tag>` on each server. Selecting it fills in the official images on Docker Hub ([`zhenglinlei`](https://hub.docker.com/u/zhenglinlei)): registry `docker.io/zhenglinlei`, names `pgcloud-db`, `pgcloud-pgpool`, `pgcloud-pgbouncer`, and the launcher version as tag (`1.0.1`). Change them to use your own registry; *Use official images* restores the defaults.
    - **tar.gz**: upload an archive created with `docker save … | gzip`. It is copied over SFTP once per server and loaded only if the image is missing.
    - **on hosts**: the images already exist on the servers (built with `docker/<service>/BUILD.sh`).
 

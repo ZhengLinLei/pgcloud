@@ -206,7 +206,14 @@ else
     pglog "----- Generating PCP conf ------"
     pglog " User: $PCP_USER"
     pglog " Pass: ********"
-    echo -e "\n$PCP_USER:$(pg_md5 $PCP_PASS)" >> $CONF_BASE_PATH/pcp.conf
+    # "--": a password that starts with "-" would be read as an option (pg_md5 then prints its help
+    # and still exits 0)
+    PCP_HASH=$(pg_md5 -- "$PCP_PASS")
+    if ! echo "$PCP_HASH" | grep -Eq '^[0-9a-f]{32}$'; then
+        pglog "ERROR: could not hash the PCP password"
+        exit 1
+    fi
+    echo -e "\n$PCP_USER:$PCP_HASH" >> $CONF_BASE_PATH/pcp.conf
 
 
     # Watchdog configuration PGPOOL_NUM = 1 disable, PGPOOL_NUM > 1 enable
@@ -242,10 +249,13 @@ else
         head -c 32 /dev/urandom | base64 > ~/.pgpoolkey
         chmod 600 ~/.pgpoolkey
     fi
-    pg_enc -m -k ~/.pgpoolkey -f $PGPOOL_CONF_PATH/pgpool.conf -u "$POSTGRES_USER" "$POSTGRES_PASSWORD" > /dev/null || {
+    # "--" before the password: one that starts with "-" would be parsed as an option, and pg_enc
+    # then prints its help, exits 0 and writes nothing. Check the entry instead of the exit code.
+    pg_enc -m -k ~/.pgpoolkey -f $PGPOOL_CONF_PATH/pgpool.conf -u "$POSTGRES_USER" -- "$POSTGRES_PASSWORD" > /dev/null
+    if ! grep -q "^$POSTGRES_USER:AES" $PGPOOL_CONF_PATH/pool_passwd 2>/dev/null; then
         pglog "ERROR: could not write pool_passwd for $POSTGRES_USER"
         exit 1
-    }
+    fi
     chmod 600 $PGPOOL_CONF_PATH/pool_passwd
     pglog "pool_passwd entry created for $POSTGRES_USER ... ok"
 
