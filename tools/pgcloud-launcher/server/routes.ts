@@ -226,6 +226,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
     api.get('/api/validate', async () => validateTopology());
 
+    /** After a failover: make every PostgreSQL node a replica of the node that is primary right now. */
+    api.post('/api/adopt-live-roles', async () => {
+      const t = topology();
+      const live = liveSnapshot();
+      const pgs = t.nodes.filter((n) => n.type === 'postgres');
+      const primaries = pgs.filter((n) => live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
+      if (primaries.length !== 1) throw badRequest(`Expected exactly one running primary, found ${primaries.length}`);
+      const p = primaries[0];
+      for (const e of t.edges) {
+        const s = pgs.find((n) => n.id === e.source);
+        const d = pgs.find((n) => n.id === e.target);
+        if (s && d) deleteEdge(e.id);
+      }
+      for (const n of pgs) if (n.id !== p.id) createEdge(n.id, p.id);
+      emitEvent('info', `Topology updated to the live roles: ${p.name} is the primary`, p.id);
+      broadcast({ type: 'topology' });
+      return { primary: p.name };
+    });
+
     // ---------------------------------------------- deployments
     api.post('/api/deploy', async () => deployAll());
     api.get('/api/deployments', async () => ({ deployments: listDeployments(), current: currentDeployment() }));

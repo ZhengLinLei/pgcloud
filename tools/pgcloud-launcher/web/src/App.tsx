@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { APP_VERSION } from '../../shared/types';
 import { api, post } from './api';
 import { StoreProvider, useStore } from './store';
 import { Logo, LogoutIcon, MoonIcon, SunIcon } from './components/icons';
@@ -69,7 +70,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
             <span className={`dot ${connected ? 'up' : 'down'}`} />
             {connected ? 'LIVE' : 'OFFLINE'}
           </span>
-          <span className="sub">v0.1</span>
+          <span className="sub">v{APP_VERSION}</span>
         </div>
         <div className="header-right">
           <div className="pulse-stat">
@@ -158,7 +159,7 @@ function Login({ onLogin }: { onLogin: () => void }) {
           PgCloud Launcher
           <span className="grow" />
           <span className="faint" style={{ fontWeight: 400 }}>
-            v0.1
+            v{APP_VERSION}
           </span>
         </div>
         <div className="panel-body">

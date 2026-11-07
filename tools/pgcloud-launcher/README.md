@@ -1,4 +1,4 @@
-# tools/pgpool-launcher — PgCloud Launcher
+# tools/pgcloud-launcher — PgCloud Launcher
 
 A web application to **design, deploy and monitor** PgCloud clusters visually.
 
@@ -20,13 +20,21 @@ A web application to **design, deploy and monitor** PgCloud clusters visually.
 
 ## Run it
 
+From the repository root (the PgCloud sources are bundled in the image):
+
 ```bash
-docker build -t pgcloud/launcher tools/pgpool-launcher
+docker build -t pgcloud/launcher:1.0.0 -f tools/pgcloud-launcher/Dockerfile .
 docker run -d --name pgcloud-launcher \
   -p 8080:8080 \
   -v pgcloud-launcher:/data \
-  pgcloud/launcher
+  pgcloud/launcher:1.0.0
 docker logs pgcloud-launcher     # prints the generated admin password
+```
+
+Or use the published image (built by [`.github/workflows/release-images.yml`](../../.github/workflows/release-images.yml) on every GitHub release):
+
+```bash
+docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.0
 ```
 
 Open <http://localhost:8080>. The admin password is also saved in `/data/admin-password.txt`. You can change it in **Settings**, or fix it with `-e LAUNCHER_ADMIN_PASSWORD=...`.
@@ -46,12 +54,13 @@ The launcher must reach every server over **SSH** (deployment) and over the **Po
 
 ### Try it locally
 
-[`test/`](test/) starts the launcher plus two fake servers (Docker-in-Docker with SSH), so you can deploy a real cluster and test failover on your laptop. See [test/README.md](test/README.md).
+[`test/`](test/) starts the launcher plus three fake servers (Docker-in-Docker with SSH), so you can deploy a real cluster and test failover on your laptop. See [test/README.md](test/README.md).
 
 ## Workflow
 
 1. **Settings** → choose the image source:
-   - **registry**: `docker pull <registry>/<name>:<tag>` on each server (for the images published on Docker Hub).
+   - **build** (default): the launcher copies the bundled PgCloud sources to each server over SFTP and runs `docker build` / `podman build` there. Images are labelled with a hash of their sources and rebuilt only when they change. The first build takes a few minutes and the servers need Internet access.
+   - **registry**: `docker pull <registry>/<name>:<tag>` on each server. Selecting it fills in the official images on Docker Hub ([`zhenglinlei`](https://hub.docker.com/u/zhenglinlei)): registry `docker.io/zhenglinlei`, names `pgcloud-db`, `pgcloud-pgpool`, `pgcloud-pgbouncer`, and the launcher version as tag (`1.0.0`). Change them to use your own registry; *Use official images* restores the defaults.
    - **tar.gz**: upload an archive created with `docker save … | gzip`. It is copied over SFTP once per server and loaded only if the image is missing.
    - **on hosts**: the images already exist on the servers (built with `docker/<service>/BUILD.sh`).
 
@@ -79,7 +88,11 @@ Verified end to end (2 servers, pgbench running through PgBouncer, primary conta
 - the old primary is `pg_rewind`-ed and back as a streaming replica after about 15 s, attached to pgpool after about 20 s;
 - PgBouncer and Pgpool keep answering, and writes made after the failover reach the rejoined replica.
 
-After a failover the new primary runs with **asynchronous** replication (otherwise commits would block while no standby is connected). Redeploy the PostgreSQL nodes from the launcher to restore synchronous mode.
+After a failover the new primary runs with **asynchronous** replication (otherwise commits would block while no standby is connected). The topology still shows the old roles: the deploy is blocked until you press **Adopt live roles** (Topology toolbar), which redraws the replication links to the running primary. The next cluster deploy turns synchronous replication on again as soon as a replica streams.
+
+Planned work never triggers a failover: while the launcher redeploys or restarts PostgreSQL nodes it pauses the Pgpool-II containers and resumes them afterwards.
+
+The complete manual, the illustrated tutorial and the test/benchmark report are in the book: [`doc/wiki/PgCloud_The_Master_Book_v1.0.0.pdf`](../../doc/wiki/PgCloud_The_Master_Book_v1.0.0.pdf).
 
 ## Security
 
@@ -87,10 +100,23 @@ After a failover the new primary runs with **asynchronous** replication (otherwi
 - SSH passwords/keys and cluster passwords are stored encrypted with AES-256-GCM and are never returned to the browser. The cluster passwords can be revealed explicitly in Settings.
 - The launcher holds root-level access to your servers: expose it only on a private network or behind a VPN/TLS proxy.
 
+## Release images
+
+Publishing a GitHub release runs [`.github/workflows/release-images.yml`](../../.github/workflows/release-images.yml). It builds the four images for `linux/amd64` and `linux/arm64` and pushes them to Docker Hub ([hub.docker.com/u/zhenglinlei](https://hub.docker.com/u/zhenglinlei)):
+
+| Image | Dockerfile |
+|---|---|
+| `zhenglinlei/pgcloud-db` | `docker/db/Dockerfile` |
+| `zhenglinlei/pgcloud-pgpool` | `docker/pgpool/Dockerfile` |
+| `zhenglinlei/pgcloud-pgbouncer` | `docker/pgbouncer/Dockerfile` |
+| `zhenglinlei/pgcloud-launcher` | `tools/pgcloud-launcher/Dockerfile` |
+
+A release tagged `v1.2.3` produces the tags `1.2.3`, `1.2` and `latest` (`latest` is skipped for pre-releases). The repository needs the secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access token with *Read & Write* scope). The workflow can also be run by hand (*Actions → Publish release images → Run workflow*) for an existing tag.
+
 ## Development
 
 ```bash
-cd tools/pgpool-launcher
+cd tools/pgcloud-launcher
 npm install
 npm run dev:server      # API on :8080 (tsx watch); DATA_DIR defaults to ./data
 npm run dev:web         # UI on :5173 with hot reload, proxied to the API

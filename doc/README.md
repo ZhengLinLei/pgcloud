@@ -4,7 +4,7 @@ Documentation assets for PgCloud.
 
 | Folder | Content |
 |---|---|
-| [`wiki/`](wiki/) | The PgCloud book in PDF: [`PgCloud_The_Master_Book_v0.0.7.pdf`](wiki/PgCloud_The_Master_Book_v0.0.7.pdf), plus the A4 cover ([`PGCLOUD_A4.pdf`](wiki/PGCLOUD_A4.pdf)) and back cover ([`PGCLOUD_A4_BACK.pdf`](wiki/PGCLOUD_A4_BACK.pdf)). |
+| [`wiki/`](wiki/) | The PgCloud book in PDF (version 1.0.0: concepts, the Big Manual, the launcher tutorial and the test/benchmark report): [`PgCloud_The_Master_Book_v1.0.0.pdf`](wiki/PgCloud_The_Master_Book_v1.0.0.pdf), plus the A4 cover ([`PGCLOUD_A4.pdf`](wiki/PGCLOUD_A4.pdf)) and back cover ([`PGCLOUD_A4_BACK.pdf`](wiki/PGCLOUD_A4_BACK.pdf)). |
 | [`readme/`](readme/) | Architecture diagrams used in the main README (numbered in the order they appear). |
 | [`img/`](img/) | PgCloud logo in several variants: transparent, white, and on black or white backgrounds (also rounded). |
 

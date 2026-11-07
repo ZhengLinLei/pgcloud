@@ -12,6 +12,7 @@ import type {
 } from '../shared/types.js';
 import { CONTAINER_NAME } from '../shared/types.js';
 import type { ClusterSecrets, SshSecretConfig } from './db.js';
+import { sourcesRoot } from './sources.js';
 
 // Topology rules (edge = source connects to / depends on target):
 //   postgres  -> postgres   replica streams from primary (a postgres without such edge is the primary)
@@ -84,6 +85,7 @@ export function validate(
   settings: SettingsView,
   sshOf: (id: string) => SshSecretConfig,
   secrets: ClusterSecrets,
+  liveRoles: Record<string, string | undefined> = {},
 ): Validation {
   const issues: ValidationIssue[] = [];
   const err = (message: string, nodeId?: string) => issues.push({ level: 'error', message, nodeId });
@@ -97,6 +99,8 @@ export function validate(
   if (!secrets.password) err('Cluster password is not set (Settings).');
   if (!secrets.replicaPassword) err('Replication password is not set (Settings).');
   if (byType('pgpool').length && !secrets.pcpPassword) err('PCP password is not set (Settings).');
+  if (settings.images.source === 'build' && !sourcesRoot())
+    err('Image source is "build" but the PgCloud sources are not bundled in this launcher.');
   if (settings.images.source === 'tarball' && !settings.images.tarballs.length)
     err('Image source is "tar.gz" but no image archive has been uploaded (Settings).');
   if (!settings.cluster.allowedCidrs.trim()) err('Allowed networks (CIDR) cannot be empty (Settings).');
@@ -162,6 +166,17 @@ export function validate(
     if (up.some((u) => roles[u.id] !== 'primary')) err(`${n.name}: cascading replication is not supported; connect it to the primary.`, n.id);
   }
   const primary = primaries[0];
+  // After an automatic failover the running roles differ from the drawing. Deploying the drawing
+  // would start the old primary as a primary again: block it until the topology adopts the live roles.
+  const livePrimary = pgs.find((n) => n.deployedAt && liveRoles[n.id] === 'primary');
+  if (livePrimary && primary && livePrimary.id !== primary.id) {
+    issues.push({
+      level: 'error',
+      code: 'roles',
+      nodeId: livePrimary.id,
+      message: `${livePrimary.name} is the running primary but the topology says ${primary.name} (a failover happened). Use "Adopt live roles" before deploying.`,
+    });
+  }
   if (primary && (primary.config as unknown as PostgresConfig).synchronous && pgs.length === 1)
     warn(`${primary.name}: synchronous replication is enabled but there are no replicas; it will be deployed as asynchronous.`, primary.id);
 

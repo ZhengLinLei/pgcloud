@@ -43,7 +43,7 @@ async function withClient<T>(node: ClusterNode, database: string, fn: (c: pg.Cli
     database,
     connectionTimeoutMillis: 2500,
     query_timeout: 4000,
-    application_name: 'pgpool-launcher',
+    application_name: 'pgcloud-launcher',
   });
   client.on('error', () => undefined);
   await client.connect();

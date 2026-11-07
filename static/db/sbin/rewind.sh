@@ -2,16 +2,18 @@
 #
 # Syntax: rewind.sh <new_primary_ip> <new_primary_port>
 #
-# Turns a former primary into a replica of the new primary with pg_rewind.
-# PostgreSQL must be STOPPED (cleanly) on this data directory, so this runs in a one-off
-# container that shares the volumes of the stopped node container:
+# Turns a former primary into a replica of the new primary. PostgreSQL must be STOPPED on this
+# data directory. It is used in two ways:
 #
-#   docker stop -t 60 pgcloud_db
-#   docker run --rm --volumes-from pgcloud_db --entrypoint pgcloud_rewind <image> <new_ip> <new_port>
-#   docker start pgcloud_db
+#  1. By Pgpool-II's failover (FAILOVER_DEPROMOTE_CMD), in a one-off container that shares the
+#     volumes of the stopped node container:
+#       docker stop -t 60 pgcloud_db
+#       docker run --rm --network host --volumes-from pgcloud_db --entrypoint pgcloud_rewind <image> <ip> <port>
+#       docker start pgcloud_db
+#  2. By the entrypoint, when a node configured as replica finds data of a primary (self-healing).
 #
-# pg_rewind needs data checksums or wal_log_hints (both enabled by PgCloud) and a superuser
-# connection to the new primary.
+# Strategy: pg_rewind (fast, needs the WAL since the divergence: wal_keep_size helps); if it fails,
+# the data directory is cloned again from the new primary with pg_basebackup.
 
 set -o pipefail
 
@@ -20,17 +22,20 @@ if [ -z "$1" ] || [ -z "$2" ]; then
     exit 1
 fi
 
-# Runs as root (the mounted .env is root-only); everything touching PGDATA runs as postgres
+# Runs as root in case 1 (the mounted .env is root-only); everything touching PGDATA runs as postgres
 as_pg() {
     if [ "$(id -u)" = '0' ]; then gosu postgres "$@"; else "$@"; fi
 }
 
 PGCDATA=${PGCDATA:-/opt/pgcloud}
-# Cluster settings (users, passwords, PGDATA) come from the node's mounted .env
-if [ -f "$PGCDATA/.env" ]; then
-    set -a
-    . "$PGCDATA/.env"
-    set +a
+# Cluster settings from the node's mounted .env (docker --env-file format: KEY=value, no quoting)
+if [ -z "$POSTGRES_USER" ] && [ -r "$PGCDATA/.env" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            ''|'#'*) continue ;;
+            [A-Za-z_]*=*) export "${line%%=*}=${line#*=}" ;;
+        esac
+    done < "$PGCDATA/.env"
 fi
 PGDATA=${PGDATA:-/opt/pgdata}
 
@@ -44,22 +49,29 @@ if as_pg pg_ctl status -D "$PGDATA" >/dev/null 2>&1; then
     exit 2
 fi
 
-# pg_rewind copies non-PostgreSQL files from the source too: keep this node's own slot id
+# pg_rewind / pg_basebackup copy non-PostgreSQL files from the source too: keep this node's own slot id
 slot=$(cat "$PGDATA/PGC_SLOT" 2>/dev/null)
 if [ -z "$slot" ]; then
-    echo "Replica slot id not found in $PGDATA/PGC_SLOT ... fail"
-    exit 1
+    slot=$(cat /proc/sys/kernel/random/uuid | md5sum | cut -d ' ' -f1)
+    echo "No slot id found, generated a new one: $slot"
 fi
 
 export PGPASSWORD="$POSTGRES_PASSWORD"
 SOURCE="host=$1 port=$2 user=$POSTGRES_USER dbname=$POSTGRES_DB connect_timeout=10"
 
 echo "Running pg_rewind against $1:$2 ..."
-as_pg env PGPASSWORD="$PGPASSWORD" pg_rewind --target-pgdata="$PGDATA" --source-server="$SOURCE" --progress 2>&1 || {
-    echo "pg_rewind ... fail (the node needs a fresh base backup: destroy and redeploy it)"
-    exit 3
-}
-echo "pg_rewind ... ok"
+if as_pg env PGPASSWORD="$PGPASSWORD" pg_rewind --target-pgdata="$PGDATA" --source-server="$SOURCE" --progress 2>&1; then
+    echo "pg_rewind ... ok"
+else
+    echo "pg_rewind ... fail: cloning the node again from $1:$2 with pg_basebackup"
+    as_pg sh -c "find '$PGDATA' -mindepth 1 -delete" || { echo "Cannot empty $PGDATA ... fail"; exit 3; }
+    as_pg env PGPASSWORD="$REPLICA_PASS" pg_basebackup -h "$1" -p "$2" -U "$REPLICA_USER" -D "$PGDATA" -X stream -w \
+        -d "host=$1 port=$2 user=$REPLICA_USER application_name=$BACKEND_NAME" 2>&1 || {
+        echo "pg_basebackup ... fail"
+        exit 3
+    }
+    echo "pg_basebackup ... ok"
+fi
 
 echo "$slot" | as_pg tee "$PGDATA/PGC_SLOT" >/dev/null
 
@@ -68,7 +80,7 @@ psql -At -d "$SOURCE" -c "SELECT pg_create_physical_replication_slot('pgcloud$sl
     && echo "Creating slot pgcloud$slot on $1:$2 ... ok" \
     || echo "Creating slot pgcloud$slot on $1:$2 ... skipped (already exists)"
 
-# Standby configuration (pg_rewind copied the new primary's postgresql.auto.conf, so write it after)
+# Standby configuration (written last: the copy brought the new primary's postgresql.auto.conf)
 as_pg touch "$PGDATA/standby.signal"
 as_pg tee "$PGDATA/postgresql.auto.conf" >/dev/null <<EOF
 # Written by pgcloud_rewind

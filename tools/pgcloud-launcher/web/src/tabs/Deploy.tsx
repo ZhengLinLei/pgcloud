@@ -42,7 +42,7 @@ export function DeployTab() {
             ))}
             <div className="hr" />
             <div className="muted" style={{ fontSize: 11.5 }}>
-              Images: <b className="ok">{source === 'hub' ? 'Docker Hub / registry' : source === 'tarball' ? 'tar.gz upload' : 'already on hosts'}</b> · runtime:{' '}
+              Images: <b className="ok">{source === 'build' ? 'built on each server' : source === 'hub' ? 'Docker Hub / registry' : source === 'tarball' ? 'tar.gz upload' : 'already on hosts'}</b> · runtime:{' '}
               <b className="ok">{settings?.runtime}</b> · remote dir: <b className="ok">{settings?.remoteDir}</b>
             </div>
           </div>

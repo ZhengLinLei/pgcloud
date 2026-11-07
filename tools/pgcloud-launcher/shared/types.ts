@@ -81,7 +81,8 @@ export interface ClusterEdge {
   target: string;
 }
 
-export type ImageSource = 'hub' | 'local' | 'tarball';
+/** build: build on each server from the PgCloud sources bundled in the launcher (default). */
+export type ImageSource = 'build' | 'hub' | 'local' | 'tarball';
 export type RuntimeChoice = 'auto' | 'docker' | 'podman';
 
 export interface SettingsView {
@@ -119,6 +120,8 @@ export interface ValidationIssue {
   level: 'error' | 'warning';
   nodeId?: string;
   message: string;
+  /** 'roles' = the live roles differ from the topology (a failover happened). */
+  code?: string;
 }
 
 export interface PlanStep {
@@ -176,6 +179,21 @@ export type WsMessage =
   | { type: 'topology' };
 
 export const NODE_TYPES: NodeType[] = ['postgres', 'pgpool', 'pgbouncer'];
+
+export const APP_VERSION = '1.0.0';
+
+/** Image names used by the "build", "tar.gz" and "on hosts" sources. */
+export const LOCAL_IMAGES = {
+  names: { postgres: 'pgcloud/db', pgpool: 'pgcloud/pgpool', pgbouncer: 'pgcloud/pgbouncer' } as Record<NodeType, string>,
+  tag: 'latest',
+};
+
+/** Official images on Docker Hub (published by .github/workflows/release-images.yml), default for the "registry" source. */
+export const HUB_IMAGES = {
+  registry: 'docker.io/zhenglinlei',
+  names: { postgres: 'pgcloud-db', pgpool: 'pgcloud-pgpool', pgbouncer: 'pgcloud-pgbouncer' } as Record<NodeType, string>,
+  tag: APP_VERSION,
+};
 
 export const DEFAULT_CONFIG: Record<NodeType, Record<string, unknown>> = {
   postgres: {

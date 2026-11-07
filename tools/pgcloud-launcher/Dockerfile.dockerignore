@@ -1,0 +1,15 @@
+# Build context is the repository root: only send what the launcher image needs.
+*
+!tools/pgcloud-launcher/package.json
+!tools/pgcloud-launcher/package-lock.json
+!tools/pgcloud-launcher/tsconfig.server.json
+!tools/pgcloud-launcher/tsconfig.web.json
+!tools/pgcloud-launcher/vite.config.ts
+!tools/pgcloud-launcher/shared
+!tools/pgcloud-launcher/server
+!tools/pgcloud-launcher/web
+!docker
+!static
+# never bundle local secrets
+docker/**/.env
+**/.DS_Store

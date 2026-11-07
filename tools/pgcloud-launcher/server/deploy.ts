@@ -18,6 +18,8 @@ import { broadcast, emitEvent } from './hub.js';
 import { detectRuntime, q, withSsh, type SshSession } from './ssh.js';
 import { computeRoles, generateFiles, imageRef, validate, type Topology } from './topology.js';
 import { paths } from './env.js';
+import { liveSnapshot } from './monitor.js';
+import { buildContext, SERVICE_DIR } from './sources.js';
 
 export type NodeAction = 'deploy' | 'start' | 'stop' | 'restart' | 'remove' | 'destroy';
 
@@ -32,7 +34,9 @@ export function topology(): Topology {
 }
 
 export function validateTopology() {
-  return validate(topology(), getSettings(), getNodeSsh, getClusterSecrets());
+  const live = liveSnapshot();
+  const roles = Object.fromEntries(Object.entries(live).filter(([, l]) => l.status === 'up').map(([id, l]) => [id, l.role]));
+  return validate(topology(), getSettings(), getNodeSsh, getClusterSecrets(), roles);
 }
 
 export function runtimeOf(nodeId: string): 'docker' | 'podman' | undefined {
@@ -111,6 +115,9 @@ async function ensureImage(s: SshSession, rt: string, node: ClusterNode, log: Lo
     await s.run(`${rt} pull ${q(ref)}`, { sudo: true, onData: log.stream() });
     return ref;
   }
+  if (settings.images.source === 'build') {
+    return buildImage(s, rt, node, ref, log);
+  }
   if (await has()) {
     log.line(`Image ${ref} is present on the host`, 'ok');
     return ref;
@@ -140,6 +147,41 @@ async function ensureImage(s: SshSession, rt: string, node: ClusterNode, log: Lo
   }
   if (await has()) return ref;
   throw new Error(`Image ${ref} is not inside the uploaded archives (${settings.images.tarballs.join(', ')}). Check image names/tag in Settings.`);
+}
+
+/**
+ * "build" image source: copy the PgCloud build context bundled in the launcher to the host over
+ * SFTP and run `docker|podman build` there. Images carry a label with the hash of their sources,
+ * so they are rebuilt only when the sources change.
+ */
+async function buildImage(s: SshSession, rt: string, node: ClusterNode, ref: string, log: Logger): Promise<string> {
+  const ctx = buildContext(node.type);
+  const current = (
+    await s.exec(`${rt} image inspect -f '{{ index .Config.Labels "pgcloud.src" }}' ${q(ref)} 2>/dev/null`, { sudo: true })
+  ).stdout.trim();
+  if (current === ctx.hash) {
+    log.line(`Image ${ref} is up to date (sources ${ctx.hash})`, 'ok');
+    return ref;
+  }
+  log.line(
+    current ? `Sources changed (${current} → ${ctx.hash}): rebuilding ${ref}` : `Building ${ref} on the host (sources ${ctx.hash})`,
+    'cmd',
+  );
+  const dir = path.posix.join(await s.resolvePath(getSettings().remoteDir), 'build', SERVICE_DIR[node.type]);
+  await s.run(`rm -rf -- ${q(dir)} && mkdir -p ${q(dir)}`);
+  const dirs = new Set(ctx.files.map((f) => path.posix.dirname(path.posix.join(dir, f))));
+  await s.run(`mkdir -p ${[...dirs].map(q).join(' ')}`);
+  for (const f of ctx.files) {
+    await s.writeFile(path.posix.join(dir, f), fs.readFileSync(path.join(ctx.root, f), 'utf8'), 0o644);
+  }
+  log.line(`Uploaded ${ctx.files.length} files to ${dir}`);
+  log.line(`${rt} build -t ${ref} -f ${ctx.dockerfile} (this can take a few minutes the first time)`, 'cmd');
+  await s.run(
+    `${rt} build --label pgcloud.src=${ctx.hash} -t ${q(ref)} -f ${q(path.posix.join(dir, ctx.dockerfile))} ${q(dir)}`,
+    { sudo: true, onData: log.stream() },
+  );
+  log.line(`Image ${ref} built`, 'ok');
+  return ref;
 }
 
 function healthCommand(rt: string, node: ClusterNode): string {
@@ -265,6 +307,77 @@ async function containerAction(node: ClusterNode, action: Exclude<NodeAction, 'd
   emitEvent(action === 'stop' || action === 'remove' || action === 'destroy' ? 'warn' : 'info', `${node.name}: ${action}`, node.id);
 }
 
+/**
+ * Synchronous replication is switched off when a replica is promoted (no standby yet). After a cluster
+ * deployment, restore what the topology asks for, but only if a replica is actually streaming.
+ */
+async function syncReplication(log: Logger): Promise<void> {
+  const t = topology();
+  const roles = computeRoles(t);
+  const primary = t.nodes.find((n) => n.type === 'postgres' && roles[n.id] === 'primary');
+  const replicas = t.nodes.filter((n) => n.type === 'postgres' && roles[n.id] === 'replica');
+  if (!primary) return;
+  const wanted = (primary.config as { synchronous?: boolean }).synchronous && replicas.length > 0 ? 'FIRST 1 (*)' : '';
+  const settings = getSettings();
+  await withSsh(getNodeSsh(primary.id), async (s) => {
+    const rt = runtimeOf(primary.id) ?? (await detectRuntime(s, settings.runtime)).bin;
+    const psql = (sql: string) =>
+      `${rt} exec ${CONTAINER_NAME.postgres} psql -At -U ${q(settings.cluster.user)} -d ${q(settings.cluster.database)} -c ${q(sql)}`;
+    const current = (await s.exec(psql('SHOW synchronous_standby_names'), { sudo: true })).stdout.trim();
+    if (current === wanted) return;
+    if (wanted) {
+      const streaming = Number((await s.exec(psql("SELECT count(*) FROM pg_stat_replication WHERE state = 'streaming'"), { sudo: true })).stdout.trim());
+      if (!streaming) {
+        log.line(`${primary.name}: no replica streaming yet; synchronous replication stays off`, 'warn');
+        return;
+      }
+    }
+    await s.run(psql(`ALTER SYSTEM SET synchronous_standby_names = '${wanted}'`), { sudo: true });
+    await s.run(psql('SELECT pg_reload_conf()'), { sudo: true });
+    log.line(`${primary.name}: synchronous_standby_names = '${wanted}'`, 'ok');
+  });
+}
+
+/**
+ * Planned work on PostgreSQL nodes (redeploy, restart) stops their containers for a moment.
+ * A running Pgpool-II would take that for a crash and fail over (promote a replica while the old
+ * primary comes back = two primaries), so the deployed Pgpool-II containers are paused meanwhile.
+ */
+async function withPgpoolPaused<T>(log: Logger, fn: () => Promise<T>): Promise<T> {
+  const pools = listNodes().filter((n) => n.type === 'pgpool' && n.deployedAt);
+  const paused: ClusterNode[] = [];
+  for (const p of pools) {
+    try {
+      await withSsh(getNodeSsh(p.id), async (s) => {
+        const rt = runtimeOf(p.id) ?? (await detectRuntime(s, getSettings().runtime)).bin;
+        log.line(`Pausing ${p.name} during planned maintenance (avoids an unwanted failover)`, 'cmd');
+        await s.exec(`${rt} stop -t 10 ${CONTAINER_NAME.pgpool}`, { sudo: true });
+      });
+      paused.push(p);
+    } catch (e) {
+      log.line(`Could not pause ${p.name}: ${(e as Error).message}`, 'warn');
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const p of paused) {
+      try {
+        await withSsh(getNodeSsh(p.id), async (s) => {
+          const rt = runtimeOf(p.id) ?? (await detectRuntime(s, getSettings().runtime)).bin;
+          const state = (await s.exec(`${rt} inspect -f '{{.State.Status}}' ${CONTAINER_NAME.pgpool}`, { sudo: true })).stdout.trim();
+          if (state !== 'running') {
+            log.line(`Resuming ${p.name}`, 'cmd');
+            await s.run(`${rt} start ${CONTAINER_NAME.pgpool}`, { sudo: true });
+          }
+        });
+      } catch (e) {
+        log.line(`Could not resume ${p.name}: ${(e as Error).message}`, 'error');
+      }
+    }
+  }
+}
+
 export function runNodeAction(nodeId: string, action: NodeAction): Deployment {
   const node = getNode(nodeId);
   if (!node) throw Object.assign(new Error('Node not found'), { statusCode: 404 });
@@ -272,7 +385,12 @@ export function runNodeAction(nodeId: string, action: NodeAction): Deployment {
     const v = validateTopology();
     const blocking = v.issues.filter((i) => i.level === 'error' && (!i.nodeId || i.nodeId === nodeId));
     if (blocking.length) throw Object.assign(new Error(blocking.map((i) => i.message).join('\n')), { statusCode: 400 });
-    return startJob('deploy', node.name, (log) => deployNode(node, log));
+    return startJob('deploy', node.name, (log) =>
+      node.type === 'postgres' ? withPgpoolPaused(log, () => deployNode(node, log)) : deployNode(node, log),
+    );
+  }
+  if (node.type === 'postgres' && action === 'restart') {
+    return startJob(action, node.name, (log) => withPgpoolPaused(log, () => containerAction(node, action, log)));
   }
   return startJob(action, node.name, (log) => containerAction(node, action, log));
 }
@@ -286,10 +404,13 @@ export function deployAll(): Deployment {
   return startJob('deploy', 'cluster', async (log) => {
     log.line(`Deploying ${v.plan.length} nodes: ${v.plan.map((p) => `${p.name}(${p.role})`).join(' → ')}`);
     emitEvent('info', `Cluster deployment started (${v.plan.length} nodes)`);
-    for (const step of v.plan) {
-      const node = getNode(step.nodeId);
-      if (node) await deployNode(node, log);
-    }
+    await withPgpoolPaused(log, async () => {
+      for (const step of v.plan) {
+        const node = getNode(step.nodeId);
+        if (node) await deployNode(node, log);
+      }
+    });
+    await syncReplication(log).catch((e) => log.line(`Could not set synchronous replication: ${(e as Error).message}`, 'warn'));
     emitEvent('success', 'Cluster deployment finished');
   });
 }

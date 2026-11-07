@@ -44,6 +44,7 @@ Each node stores its own slot id in `$PGDATA/PGC_SLOT`. The failover scripts use
 | `SYNCHRONOUS_RULE` / `SYNCHRONOUS_NAME` | `FIRST 1` / `*` | Builds `synchronous_standby_names`. Leave both empty for async replication. |
 | `PRIMARY_HOST` / `PRIMARY_PORT` | `127.0.0.1` / `5432` | Primary to clone from (replicas only). Updated automatically after a failover. |
 | `PROMOTE_MIN_DELAY` | `0` | Max accepted replay delay (seconds) for `pgcloud_promote`. `0` = always promote. |
+| `WAL_KEEP_SIZE` | `1GB` | WAL kept on every node so `pg_rewind` can resynchronise a former primary after a failover. |
 
 > `REPLICA_NUM`, `ARCGIVE_MODE`, `ARCHIVE_PATH` and `CLEAN_LOG_AGE` are defined but **not used yet**. WAL archiving is not implemented.
 

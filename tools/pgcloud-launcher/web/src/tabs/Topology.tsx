@@ -266,6 +266,18 @@ function Canvas({ goDeploy }: { goDeploy: () => void }) {
           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: '0 4px' }} className={errors ? 'err' : warnings ? 'warn' : 'ok'}>
             {errors ? `${errors} ERROR${errors > 1 ? 'S' : ''}` : warnings ? `${warnings} WARNING${warnings > 1 ? 'S' : ''}` : 'TOPOLOGY VALID'}
           </span>
+          {validation.issues.some((i) => i.code === 'roles') && (
+            <button
+              className="btn sm"
+              onClick={() =>
+                post<{ primary: string }>('/api/adopt-live-roles')
+                  .then((r) => toast(`Topology updated: ${r.primary} is the primary`, 'ok'))
+                  .catch((e) => toast((e as Error).message, 'error'))
+              }
+            >
+              Adopt live roles
+            </button>
+          )}
           <button className="btn sm primary" disabled={!validation.ok || !!current} onClick={goDeploy}>
             <RocketIcon /> Deploy
           </button>

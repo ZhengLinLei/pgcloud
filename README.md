@@ -28,14 +28,14 @@
     </a>
     &emsp;    
     <a>
-        <img src="https://img.shields.io/badge/version-0.1.0-brightgreen" alt="Version" />
+        <img src="https://img.shields.io/badge/version-1.0.0-brightgreen" alt="Version" />
     </a>
 </p>
 <br>
 <hr>
 <br>
 
-## 🧐  What is PgCloud?
+## What is PgCloud?
 
 <p align="justify" style="font-family: monospace;">
     PgCloud is an <code>automatic system</code> for generating distributed nodes of PostgreSQL, PgPool and PgBouncer without the need to remain on a physical machine, since it uses docker technology. The system is capable of generating Postgres nodes with database replication on the same or different machines, load balancing with PgPool and connection caching with PgBouncer.
@@ -43,7 +43,7 @@
 
 <br><br>
 
-## 🚀  Quick start
+## Quick start
 
 Requirements: Docker with the Compose plugin (`docker compose version`).
 
@@ -85,7 +85,7 @@ Two-tier only (without PgBouncer): `docker compose up -d db0 db1 db2 pgpool`.
 > **Note:** `compose.yaml` runs every node on a single host, which is ideal for development and evaluation. For production, run each node on its own machine with the scripts in `docker/<service>/` (copy `.env.example` to `.env` in each folder) — see the [Wiki](https://github.com/ZhengLinLei/pgcloud/wiki) and the [Book](./doc/wiki).
 
 <br><br>
-## 📁  What does PgCloud have?
+## What does PgCloud have?
 <p align="justify" style="font-family: monospace;">
     There are several architectures offered by PgCloud tested perfectly by our team. There is even the possibility of customising the architecture with some extra configuration. The architecture is separated by layers, specifically three: <code>Replication Layer</code>, <code>Load Balancing Layer</code> and <code>Connection Pool Layer</code>.
 </p>

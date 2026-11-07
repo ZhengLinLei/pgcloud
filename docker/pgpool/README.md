@@ -67,14 +67,14 @@ When the **primary** fails, `failover.sh` connects over SSH (using the `SSH_*` v
 |---|---|---|
 | `FAILOVER_PROMOTE_CMD` | new primary | `docker container exec pgcloud_db bash -c 'pgcloud_promote %x %r'` |
 | `FAILOVER_REDIRECT_CMD` | every other replica | `… pgcloud_redirect %h %p %x %r` |
-| `FAILOVER_RECOVERY_PRIMARY_CMD` | old primary host | checks the host is reachable (the pgpool-launcher does not start the old primary here) |
+| `FAILOVER_RECOVERY_PRIMARY_CMD` | old primary host | checks the host is reachable (the pgcloud-launcher does not start the old primary here) |
 | `FAILOVER_DEPROMOTE_CMD` | old primary | stop → `pgcloud_rewind %h %p` in a one-off container → start as replica |
 | `FAILOVER_RECOVER_REPLICA` / `FAILOVER_RECOVERY_REPLICA_CMD` | failed replica | restart it and re-attach it |
 | `FAILOVER_EXTRA_SCRIPT`, `FAILOVER_RECOVERY_CONFIG_SCRIPT` | PgPool node | optional custom hooks |
 
 Logs: `/opt/pgcloud/log/failover.log` and `failback.log`.
 
-What a primary failure looks like (tested end to end with the pgpool-launcher):
+What a primary failure looks like (tested end to end with the pgcloud-launcher):
 
 1. Pgpool detects the failure (health check or backend error) and runs `failover.sh`.
 2. The new primary is promoted over SSH. Synchronous replication is switched off on it so writes keep working.

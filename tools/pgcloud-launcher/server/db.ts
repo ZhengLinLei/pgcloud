@@ -4,6 +4,8 @@ import { paths } from './env.js';
 import { encrypt, decrypt, randomToken } from './crypto.js';
 import {
   DEFAULT_CONFIG,
+  HUB_IMAGES,
+  LOCAL_IMAGES,
   type ClusterEdge,
   type ClusterEvent,
   type ClusterNode,
@@ -106,10 +108,10 @@ function defaultSettings(): SettingsStored {
       allowedCidrs: '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16',
     },
     images: {
-      source: 'local',
-      registry: '',
-      tag: 'latest',
-      names: { postgres: 'pgcloud/db', pgpool: 'pgcloud/pgpool', pgbouncer: 'pgcloud/pgbouncer' },
+      source: 'build',
+      registry: HUB_IMAGES.registry,
+      tag: LOCAL_IMAGES.tag,
+      names: { ...LOCAL_IMAGES.names },
       tarballs: [],
     },
     runtime: 'auto',

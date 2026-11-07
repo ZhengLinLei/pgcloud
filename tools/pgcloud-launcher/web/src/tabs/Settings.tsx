@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { HUB_IMAGES, LOCAL_IMAGES } from '../../../shared/types';
 import type { ImageSource, NodeType, RuntimeChoice, SettingsView } from '../../../shared/types';
 import { api, del, formatBytes, post, put } from '../api';
 import { useStore } from '../store';
@@ -112,6 +113,22 @@ export function SettingsTab() {
   const set = (patch: Partial<SettingsView>) => setS({ ...s, ...patch });
   const setCluster = (patch: Partial<SettingsView['cluster']>) => setS({ ...s, cluster: { ...c, ...patch } });
   const setImages_ = (patch: Partial<SettingsView['images']>) => setS({ ...s, images: { ...s.images, ...patch } });
+  const sameNames = (a: Record<NodeType, string>, b: Record<NodeType, string>) =>
+    (Object.keys(b) as NodeType[]).every((t) => a[t] === b[t]);
+  // Switching to/from the registry source swaps the default names and tag (custom values are kept).
+  const setSource = (source: ImageSource) => {
+    const cur = s.images;
+    const patch: Partial<SettingsView['images']> = { source };
+    if (source === 'hub' && cur.source !== 'hub') {
+      if (!cur.registry) patch.registry = HUB_IMAGES.registry;
+      if (sameNames(cur.names, LOCAL_IMAGES.names)) patch.names = { ...HUB_IMAGES.names };
+      if (!cur.tag || cur.tag === LOCAL_IMAGES.tag) patch.tag = HUB_IMAGES.tag;
+    } else if (source !== 'hub' && cur.source === 'hub') {
+      if (sameNames(cur.names, HUB_IMAGES.names)) patch.names = { ...LOCAL_IMAGES.names };
+      if (cur.tag === HUB_IMAGES.tag) patch.tag = LOCAL_IMAGES.tag;
+    }
+    setImages_(patch);
+  };
   const entry = nodes.find((n) => n.type === 'pgbouncer') ?? nodes.find((n) => n.type === 'pgpool') ?? nodes.find((n) => n.type === 'postgres');
 
   return (
@@ -162,12 +179,13 @@ export function SettingsTab() {
               <div className="segmented">
                 {(
                   [
+                    ['build', 'build'],
                     ['hub', 'registry'],
                     ['tarball', 'tar.gz'],
                     ['local', 'on hosts'],
                   ] as Array<[ImageSource, string]>
                 ).map(([k, label]) => (
-                  <button key={k} className={s.images.source === k ? 'on' : ''} onClick={() => setImages_({ source: k })}>
+                  <button key={k} className={s.images.source === k ? 'on' : ''} onClick={() => setSource(k)}>
                     {label}
                   </button>
                 ))}
@@ -176,8 +194,17 @@ export function SettingsTab() {
             {s.images.source === 'hub' && (
               <label className="field">
                 <span>Registry / namespace</span>
-                <input className="input" placeholder="docker.io/youruser" value={s.images.registry} onChange={(e) => setImages_({ registry: e.target.value })} />
-                <small>Prefixed to each image name. Leave empty if the names already include it.</small>
+                <input className="input" placeholder={HUB_IMAGES.registry} value={s.images.registry} onChange={(e) => setImages_({ registry: e.target.value })} />
+                <small>
+                  Prefixed to each image name. Default: the official images on <a href="https://hub.docker.com/u/zhenglinlei" target="_blank" rel="noreferrer">Docker Hub</a>.{' '}
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => setImages_({ registry: HUB_IMAGES.registry, names: { ...HUB_IMAGES.names }, tag: HUB_IMAGES.tag })}
+                  >
+                    Use official images
+                  </button>
+                </small>
               </label>
             )}
             <div className="row">
@@ -192,6 +219,13 @@ export function SettingsTab() {
                 <input className="input" value={s.images.tag} onChange={(e) => setImages_({ tag: e.target.value })} />
               </label>
             </div>
+            {s.images.source === 'build' && (
+              <p className="muted" style={{ fontSize: 11.5 }}>
+                The launcher ships the PgCloud sources. On deploy it copies them to each server over SFTP and runs <code>docker build</code> /{' '}
+                <code>podman build</code> there. Images are labelled with a hash of their sources and rebuilt only when the sources change. The first
+                build takes a few minutes (PgBouncer is compiled) and the servers need Internet access to download packages.
+              </p>
+            )}
             {s.images.source === 'local' && (
               <p className="muted" style={{ fontSize: 11.5 }}>
                 The images must already exist on every host (for example built with <code>docker/&lt;service&gt;/BUILD.sh</code> and tagged with the names above).

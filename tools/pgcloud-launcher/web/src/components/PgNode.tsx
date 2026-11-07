@@ -14,8 +14,9 @@ const TYPE_SHORT = { postgres: 'postgres', pgpool: 'pgpool', pgbouncer: 'pgbounc
 function PgNodeView({ data, selected }: NodeProps<PgFlowNode>) {
   const { node, live, issues } = data;
   const m = live?.metrics ?? {};
-  const role = live?.status === 'up' && live.role ? live.role : data.role;
   const status = live?.status ?? 'unknown';
+  // live role when reachable; the drawn role for nodes not deployed yet; nothing for a node that is down
+  const role = status === 'up' && live?.role ? live.role : status === 'down' ? undefined : data.role;
   const port = (node.config as { port?: number }).port;
 
   let metrics: Array<[string, string]>;

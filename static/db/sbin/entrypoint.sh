@@ -379,6 +379,8 @@ configuration_setup() {
 	echo "port = $PGPORT"					| tee -a $PGCDATA/conf/postgresql.conf
 	echo -e "\n"                       		| tee -a $PGCDATA/conf/postgresql.conf
 	echo "password_encryption = $POSTGRES_HOST_AUTH_METHOD" | tee -a $PGCDATA/conf/postgresql.conf
+	# Keep recent WAL so pg_rewind can resynchronise a former primary after a failover
+	echo "wal_keep_size = ${WAL_KEEP_SIZE:-1GB}" | tee -a $PGCDATA/conf/postgresql.conf
 
 	pglog "Configurating postgres.conf ... ok"
 
@@ -541,6 +543,15 @@ _main() {
 				PostgreSQL Database directory appears to contain a database; Skipping initialization
 
 			EOM
+			# Self-healing: a node configured as replica must never start with the data of a primary
+			# (e.g. an old primary redeployed after a failover would create a second primary).
+			if [ "$NODE_ROLE" = "replica" ] && [ ! -f "$PGDATA/standby.signal" ] && [ -n "$PRIMARY_HOST" ]; then
+				pglog "Replica role but primary data found: rejoining $PRIMARY_HOST:$PRIMARY_PORT (pg_rewind / pg_basebackup)"
+				"$PGCDATA/sbin/rewind.sh" "$PRIMARY_HOST" "$PRIMARY_PORT" || {
+					pglog "Could not rejoin $PRIMARY_HOST:$PRIMARY_PORT; refusing to start as a second primary"
+					exit 1
+				}
+			fi
 		fi
 	fi
 

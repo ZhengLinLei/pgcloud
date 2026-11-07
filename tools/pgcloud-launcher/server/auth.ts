@@ -25,7 +25,7 @@ export function initAdmin(log: (msg: string) => void): void {
     const file = path.join(env.dataDir, 'admin-password.txt');
     fs.writeFileSync(file, password + '\n', { mode: 0o600 });
     log('─'.repeat(64));
-    log(`  pgpool-launcher admin password: ${password}`);
+    log(`  pgcloud-launcher admin password: ${password}`);
     log(`  (also saved in ${file}; change it in Settings)`);
     log('─'.repeat(64));
   }
