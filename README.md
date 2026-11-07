@@ -19,7 +19,7 @@
     ·
     <a href="https://github.com/ZhengLinLei/pgcloud/wiki">Wiki</a>
     ·
-    <a href="./doc/wiki">Book</a>
+    <a href="./docs/wiki">Book</a>
 </p>
 <br>
 <p align="center">
@@ -82,7 +82,7 @@ docker compose down -v                              # stop and delete all data
 
 Two-tier only (without PgBouncer): `docker compose up -d db0 db1 db2 pgpool`.
 
-> **Note:** `compose.yaml` runs every node on a single host, which is ideal for development and evaluation. For production, run each node on its own machine with the scripts in `docker/<service>/` (copy `.env.example` to `.env` in each folder) — see the [Wiki](https://github.com/ZhengLinLei/pgcloud/wiki) and the [Book](./doc/wiki).
+> **Note:** `compose.yaml` runs every node on a single host, which is ideal for development and evaluation. For production, run each node on its own machine with the scripts in `docker/<service>/` (copy `.env.example` to `.env` in each folder) — see the [Wiki](https://github.com/ZhengLinLei/pgcloud/wiki) and the [Book](./docs/wiki).
 
 <br><br>
 ## What does PgCloud have?
@@ -184,7 +184,7 @@ By default the system is enabled to launch this architecture.
 <p align="center">
     <a href="https://github.com/ZhengLinLei/pgcloud/wiki">Wiki</a>
     ·
-    <a href="./doc/wiki">Book</a>
+    <a href="./docs/wiki">Book</a>
 </p>
 <br><br><br><br>
 

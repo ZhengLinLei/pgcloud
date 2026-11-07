@@ -6,7 +6,7 @@ import react from '@vitejs/plugin-react';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Demo output: the repository's doc/ folder, which also holds the book, images and diagrams.
-const DEMO_OUT = path.resolve(here, '../../doc');
+const DEMO_OUT = path.resolve(here, '../../docs');
 
 /** Remove only the files of the previous demo build; everything else in doc/ is kept. */
 function cleanDemoOutput(): Plugin {

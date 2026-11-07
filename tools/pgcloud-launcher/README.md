@@ -92,7 +92,7 @@ After a failover the new primary runs with **asynchronous** replication (otherwi
 
 Planned work never triggers a failover: while the launcher redeploys or restarts PostgreSQL nodes it pauses the Pgpool-II containers and resumes them afterwards.
 
-The complete manual, the illustrated tutorial and the test/benchmark report are in the book: [`doc/wiki/PgCloud_The_Master_Book_v1.0.0.pdf`](../../doc/wiki/PgCloud_The_Master_Book_v1.0.0.pdf).
+The complete manual, the illustrated tutorial and the test/benchmark report are in the book: [`doc/wiki/PgCloud_The_Master_Book_v1.0.0.pdf`](../../docs/wiki/PgCloud_The_Master_Book_v1.0.0.pdf).
 
 ## Security
 
@@ -115,7 +115,7 @@ A release tagged `v1.2.3` produces the tags `1.2.3`, `1.2` and `latest` (`latest
 
 ## Web demo
 
-`npm run build:demo` builds a front-end only version of the UI into [`doc/`](../../doc/) (`index.html`, `assets/`, `logo.png`, `favicon.png`), with a **DEMO** watermark and a banner. The rest of `doc/` (book, images, diagrams) is kept: each build only replaces the previous demo files. It is for illustration only:
+`npm run build:demo` builds a front-end only version of the UI into [`docs/`](../../docs/) (`index.html`, `assets/`, `logo.png`, `favicon.png`), with a **DEMO** watermark and a banner. The rest of `doc/` (book, images, diagrams) is kept: each build only replaces the previous demo files. It is for illustration only:
 
 - the API and the live feed are simulated in the browser from [`web/src/demo/snapshot.json`](web/src/demo/snapshot.json), a snapshot recorded from the playground cluster (secrets replaced by `********`);
 - the topology can be edited in memory; deploying, node actions, SSH tests and uploads answer "Not available in the demo";
