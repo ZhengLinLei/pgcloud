@@ -40,6 +40,20 @@ export function validateTopology() {
   const live = liveSnapshot();
   const roles = Object.fromEntries(Object.entries(live).filter(([, l]) => l.status === 'up').map(([id, l]) => [id, l.role]));
   const v = validate(topology(), getSettings(), getNodeSsh, getClusterSecrets(), roles);
+  // Pgpool-II keeps a backend detached even when it comes back (e.g. the primary started later than
+  // Pgpool-II after a server restart): flag backends that are "down" in Pgpool-II but running
+  // One warning per PostgreSQL node (with the watchdog every Pgpool-II node reports the same backend)
+  const detached = detachedBackends();
+  for (const node of [...new Map(detached.map((d) => [d.node.id, d.node])).values()]) {
+    const ds = detached.filter((d) => d.node.id === node.id);
+    const pools = ds.map((d) => d.pool.name).join(', ');
+    v.issues.push({
+      level: 'warning',
+      nodeId: ds[0].pool.id,
+      code: 'detached',
+      message: `${node.name} is running${ds[0].isPrimary ? ' as the primary' : ''} but detached in Pgpool-II (${pools})${ds[0].isPrimary ? ', so writes fail' : ''}. Select ${ds[0].pool.name} and press Re-attach.`,
+    });
+  }
   // Deployed nodes whose configuration no longer matches the topology (e.g. a node added later)
   for (const n of topology().nodes) {
     const stored = kv.get<string>(`cfg:${n.id}`);
@@ -57,8 +71,8 @@ export function validateTopology() {
         code: 'stale',
         message:
           n.type === 'pgpool'
-            ? `${n.name}: deployed with an older topology (backends or watchdog members changed). Redeploy it: all Pgpool-II nodes must share the same configuration.`
-            : `${n.name}: the topology changed since it was deployed. Redeploy it to apply the change.`,
+            ? `${n.name}: its configuration changed since it was deployed (settings, backends or watchdog members). Redeploy it: every Pgpool-II node is redeployed together.`
+            : `${n.name}: its configuration changed since it was deployed (settings or topology). Redeploy it to apply the change.`,
       });
     }
   }
@@ -753,5 +767,56 @@ export function makeWatchdogLeader(targetId: string): Deployment {
     }
     const info = await readWatchdog();
     throw new Error(`${target.name} did not become the leader (leader: ${info.leader ?? 'none'})`);
+  });
+}
+
+// ------------------------------------------------------------------ detached Pgpool-II backends
+
+export interface DetachedBackend {
+  pool: ClusterNode;
+  node: ClusterNode;
+  backendId: number;
+  isPrimary: boolean;
+}
+
+/** Backends that a running Pgpool-II marks down while the PostgreSQL node itself is up. */
+export function detachedBackends(): DetachedBackend[] {
+  const live = liveSnapshot();
+  const nodes = listNodes();
+  const out: DetachedBackend[] = [];
+  const seen = new Set<string>();
+  for (const pool of nodes.filter((n) => n.type === 'pgpool' && live[n.id]?.status !== 'down')) {
+    for (const row of live[pool.id]?.tables?.poolNodes ?? []) {
+      if (row.status !== 'down') continue;
+      const node = nodes.find(
+        (n) => n.type === 'postgres' && (n.address === row.hostname || n.ssh.host === row.hostname) && String(pgPort(n)) === String(row.port),
+      );
+      if (!node || live[node.id]?.status !== 'up') continue;
+      const key = `${pool.id}:${node.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ pool, node, backendId: Number(row.node_id), isPrimary: live[node.id]?.role === 'primary' });
+    }
+  }
+  return out;
+}
+
+/**
+ * Re-attach the running PostgreSQL backends that Pgpool-II keeps detached (pcp_attach_node). With the
+ * watchdog the change reaches every Pgpool-II node; each one is checked anyway.
+ */
+export function reattachBackends(poolId: string): Deployment {
+  const pool = getNode(poolId);
+  if (!pool || pool.type !== 'pgpool') throw fail('Choose a Pgpool-II node');
+  const todo = detachedBackends().filter((d) => d.pool.id === poolId);
+  if (!todo.length) throw fail(`${pool.name} has no running backend to re-attach`);
+  return startJob('re-attach', `${pool.name}: ${todo.map((d) => d.node.name).join(', ')}`, async (log) => {
+    for (const d of todo) {
+      await onNode(pool, async (s, rt) => {
+        log.line(`${pool.name}: pcp_attach_node ${d.backendId} (${d.node.name}${d.isPrimary ? ', primary' : ''})`, 'cmd');
+        await s.run(`${rt} exec ${CONTAINER_NAME.pgpool} ./tools/attach.sh ${d.backendId}`, { sudo: true, onData: log.stream() });
+      });
+      emitEvent('success', `${pool.name}: ${d.node.name} attached again`, pool.id);
+    }
   });
 }

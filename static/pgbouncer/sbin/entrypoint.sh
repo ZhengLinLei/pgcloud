@@ -151,10 +151,9 @@ pglog "> Ini file: $PGB_CONF_PATH/pgbouncer.ini"
 # Run pgbouncer
 if [ "$ENABLE_LOGFILE" = "on" ]; then
     # Run pgbouncer to cronolog and output to file
-    pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini 2>&1 | cronolog    \
-        --hardlink=$PGCDATA/$LOG_NAME   \
-        "$PGCDATA/$LOG_FILENAME"
+    # exec: pgbouncer becomes PID 1 and receives `docker stop` (SIGTERM) itself
+    exec pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini > >(cronolog --hardlink=$PGCDATA/$LOG_NAME "$PGCDATA/$LOG_FILENAME") 2>&1
 else
-    # Run pgbouncer to stdout and stderr
-    pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini
+    # Run pgbouncer to stdout and stderr (PID 1, see above)
+    exec pgbouncer -u pgbouncer $PGB_CONF_PATH/pgbouncer.ini
 fi

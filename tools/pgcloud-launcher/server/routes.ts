@@ -38,6 +38,7 @@ import {
   currentDeployment,
   deployAll,
   makeWatchdogLeader,
+  reattachBackends,
   runNodeAction,
   switchover,
   watchdogInfo,
@@ -155,6 +156,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     api.post<{ Params: { id: string } }>('/api/nodes/:id/watchdog-leader', async (req) => makeWatchdogLeader(req.params.id));
 
     api.get('/api/watchdog', async () => watchdogInfo());
+
+    /** Re-attach the running backends that this Pgpool-II node keeps detached. */
+    api.post<{ Params: { id: string } }>('/api/nodes/:id/reattach', async (req) => reattachBackends(req.params.id));
 
     api.post<{ Params: { id: string; action: NodeAction } }>('/api/nodes/:id/actions/:action', async (req) => {
       const allowed: NodeAction[] = ['deploy', 'start', 'stop', 'restart', 'remove', 'destroy'];

@@ -160,6 +160,18 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
             )}
           </div>
         )}
+        {node.type === 'pgpool' && issues.some((i) => i.code === 'detached') && (
+          <div className="ha-box">
+            <div className="ha-title">Detached backends</div>
+            <p className="faint">
+              Pgpool-II keeps these PostgreSQL nodes detached although they are running (for example after a server restart). Re-attach
+              them with PCP; with the watchdog every Pgpool-II node gets the change.
+            </p>
+            <button className="btn primary" disabled={busy} onClick={() => run(`/api/nodes/${node.id}/reattach`, `Re-attach in ${node.name}`)}>
+              <PlugIcon /> Re-attach
+            </button>
+          </div>
+        )}
         {watchdogOn && (
           <div className="ha-box">
             <div className="ha-title">

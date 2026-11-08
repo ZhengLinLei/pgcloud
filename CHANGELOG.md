@@ -8,6 +8,8 @@
 - *PgCloud - The Master Book* v1.1.0 (`docs/wiki`): root scripts, switchover and watchdog in the manual (4.7.4) and the tutorial (5.10), test results in section 6.6.
 
 ### Fixed
+- **Pgpool-II looped forever after `docker stop` / `docker start`** ("pid file found. is another pgpool running?"): the entrypoint was PID 1 and did not pass the stop signal, so Docker killed Pgpool-II and its pid file stayed. Pgpool-II and PgBouncer now run as PID 1 (`exec`), the Pgpool-II image stops with SIGINT (fast shutdown), and stale pid / socket files are removed at start.
+- **Pgpool-II kept a running PostgreSQL node detached** after the whole system restarted (the primary came back after Pgpool-II, which never attaches a primary by itself, so writes failed). `auto_failback = on` now re-attaches streaming replicas automatically, and the launcher warns about any running node that Pgpool-II keeps detached, with a **Re-attach** button in the Pgpool-II inspector.
 - A promoted node kept `NODE_ROLE=replica` in its container environment. After a restart, the entrypoint could try to rejoin the old primary. `pgcloud_promote` now records `NODE_ROLE=primary` in the mounted `.env`, the entrypoint reads the role from that file, and it never rejoins a host that is itself a replica.
 - **A Pgpool-II node added later never joined the watchdog** ("Add to watchdog cluster request is rejected") and restarted in a loop: deploying one Pgpool-II node left the others with the old member list. Deploying a Pgpool-II node now redeploys every deployed Pgpool-II node, and the launcher warns about any deployed node whose configuration no longer matches the topology ("Redeploy it").
 

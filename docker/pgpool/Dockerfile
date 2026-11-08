@@ -54,3 +54,7 @@ RUN chmod 750 ./conf
 
 
 ENTRYPOINT [ "./sbin/entrypoint.sh" ]
+
+# SIGINT = pgpool "fast" shutdown: it exits at once instead of waiting for clients (SIGTERM, smart
+# mode), so `docker stop` does not end up killing it.
+STOPSIGNAL SIGINT

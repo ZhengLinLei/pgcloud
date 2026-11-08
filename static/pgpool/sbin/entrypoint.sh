@@ -269,12 +269,15 @@ pglog "-----------------------------"
 pglog "> Starting pgpool"
 pglog "> Listening on port $PGPOOL_PORT"
 
+# Nothing runs yet in a starting container: a pid file or socket left by a killed pgpool (e.g. a
+# `docker stop` that timed out) would make pgpool refuse to start ("pid file found") and loop forever.
+rm -f /var/run/pgpool/pgpool.pid /tmp/.s.PGSQL.* /var/run/postgresql/.s.PGSQL.* 2>/dev/null
+
 if [ "$ENABLE_LOGFILE" = "on" ]; then
-    # Run pgpool to cronolog and output to file
-    pgpool -n 2>&1 | cronolog    \
-        --hardlink=$PGCDATA/$LOG_NAME   \
-        "$PGCDATA/$LOG_FILENAME"
+    # Run pgpool to cronolog and output to file; exec keeps pgpool as PID 1 so it receives
+    # the stop signal (SIGINT = fast shutdown) and exits cleanly
+    exec pgpool -n > >(cronolog --hardlink=$PGCDATA/$LOG_NAME "$PGCDATA/$LOG_FILENAME") 2>&1
 else
-    # Run pgpool to stdout and stderr
-    pgpool -n
+    # Run pgpool to stdout and stderr (PID 1, see above)
+    exec pgpool -n
 fi
