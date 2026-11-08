@@ -422,6 +422,15 @@ _main() {
 
 		# If we are running as root, then restart the script as postgres user
 		if [ "$(id -u)" = '0' ]; then
+			# The failover scripts record role changes in the mounted .env (root-only), while the
+			# container environment keeps the values from its creation. Use the current ones.
+			if [ -f "$PGCDATA/.env" ]; then
+				for key in NODE_ROLE PRIMARY_HOST PRIMARY_PORT; do
+					value=$(sed -n "s/^$key=//p" "$PGCDATA/.env" | tail -1)
+					[ -n "$value" ] && export "$key=$value"
+				done
+				pglog "Role from $PGCDATA/.env: $NODE_ROLE${PRIMARY_HOST:+ (primary $PRIMARY_HOST:$PRIMARY_PORT)}"
+			fi
 			pglog ""
 			pglog "Switching to postgres user ... ok"
 			# then restart script as postgres user
@@ -545,7 +554,11 @@ _main() {
 			EOM
 			# Self-healing: a node configured as replica must never start with the data of a primary
 			# (e.g. an old primary redeployed after a failover would create a second primary).
-			if [ "$NODE_ROLE" = "replica" ] && [ ! -f "$PGDATA/standby.signal" ] && [ -n "$PRIMARY_HOST" ]; then
+			if [ "$NODE_ROLE" = "replica" ] && [ ! -f "$PGDATA/standby.signal" ] && [ -n "$PRIMARY_HOST" ] \
+				&& [ "$(PGPASSWORD="$POSTGRES_PASSWORD" PGCONNECT_TIMEOUT=5 psql -h "$PRIMARY_HOST" -p "${PRIMARY_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc 'SELECT pg_is_in_recovery()' 2>/dev/null)" = "t" ]; then
+				# PRIMARY_HOST is itself a replica: this node is the real primary (role not recorded yet)
+				pglog "NODE_ROLE=replica but $PRIMARY_HOST:$PRIMARY_PORT is a replica: starting as the primary"
+			elif [ "$NODE_ROLE" = "replica" ] && [ ! -f "$PGDATA/standby.signal" ] && [ -n "$PRIMARY_HOST" ]; then
 				pglog "Replica role but primary data found: rejoining $PRIMARY_HOST:$PRIMARY_PORT (pg_rewind / pg_basebackup)"
 				"$PGCDATA/sbin/rewind.sh" "$PRIMARY_HOST" "$PRIMARY_PORT" || {
 					pglog "Could not rejoin $PRIMARY_HOST:$PRIMARY_PORT; refusing to start as a second primary"

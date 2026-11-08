@@ -122,3 +122,5 @@ export const EyeIcon = ({ size = 14 }: P) =>
   );
 export const UploadIcon = ({ size = 14 }: P) => svg(size, <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />);
 export const CloseIcon = ({ size = 14 }: P) => svg(size, <path d="M18 6 6 18M6 6l12 12" />);
+export const SwitchIcon = ({ size = 14 }: P) => svg(size, <path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" />);
+export const CrownIcon = ({ size = 14 }: P) => svg(size, <path d="M3 18h18M4 16 3 7l5 4 4-6 4 6 5-4-1 9z" />);

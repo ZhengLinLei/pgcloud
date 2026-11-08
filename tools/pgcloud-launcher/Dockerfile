@@ -3,8 +3,8 @@
 # Build context = repository root (the PgCloud sources in docker/ and static/ are bundled so the
 # launcher can build the node images on each server):
 #
-#   docker build -t pgcloud/launcher:1.0.1 -f tools/pgcloud-launcher/Dockerfile .
-#   docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data pgcloud/launcher:1.0.1
+#   docker build -t pgcloud/launcher:1.1.0 -f tools/pgcloud-launcher/Dockerfile .
+#   docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data pgcloud/launcher:1.1.0
 
 # ---------------------------------------------------------------- build
 FROM node:22-alpine AS build
@@ -21,7 +21,7 @@ RUN npm run build && npm prune --omit=dev
 FROM node:22-alpine
 LABEL org.opencontainers.image.title="pgcloud-launcher" \
       org.opencontainers.image.description="Visual launcher for PgCloud clusters (PostgreSQL + Pgpool-II + PgBouncer)" \
-      org.opencontainers.image.version="1.0.1" \
+      org.opencontainers.image.version="1.1.0" \
       org.opencontainers.image.source="https://github.com/ZhengLinLei/pgcloud" \
       org.opencontainers.image.licenses="GPL-3.0"
 

@@ -14,7 +14,7 @@ This is the entry point of the **PgCloud** project. The node images it deploys a
 
 Source code, manual and book: https://github.com/ZhengLinLei/pgcloud
 
-Tags: `1.0.1`, `1.0.0`, `1.0`, `latest`. Platforms: `linux/amd64`, `linux/arm64`.
+Tags: `1.1.0`, `1.1`, `latest` (older: `1.0.1`, `1.0.0`, `1.0`). Platforms: `linux/amd64`, `linux/arm64`.
 
 ## Quick start
 
@@ -22,7 +22,7 @@ Tags: `1.0.1`, `1.0.0`, `1.0`, `latest`. Platforms: `linux/amd64`, `linux/arm64`
 docker run -d --name pgcloud-launcher \
   -p 8080:8080 \
   -v pgcloud-launcher:/data \
-  zhenglinlei/pgcloud-launcher:1.0.1
+  zhenglinlei/pgcloud-launcher:1.1.0
 
 docker logs pgcloud-launcher    # prints the generated admin password
 ```
@@ -42,6 +42,7 @@ The launcher must reach every server over SSH and over the PostgreSQL / Pgpool-I
 - **One-click deployment over SSH**: detects Docker or Podman, prepares the images, writes the configuration and (re)creates each container. Data volumes are kept on redeploy.
 - **Image sources**: build on each server from the bundled sources (default), pull from Docker Hub (`zhenglinlei/*`, filled in automatically), upload a `tar.gz` for air-gapped sites, or use images already on the hosts.
 - **Automatic failover** handled by Pgpool-II: a replica is promoted, the others follow it, and the old primary comes back as a replica with `pg_rewind`. Planned work from the launcher pauses Pgpool-II so it never triggers a failover. *Adopt live roles* updates the drawing after a failover.
+- **Manual switchover in one click**: *Make primary* on a replica swaps it with the primary without losing committed transactions; *Make watchdog leader* moves the Pgpool-II leadership.
 - **Real-time monitoring** and event log, light and dark mode.
 - **Security**: admin password (scrypt), SSH secrets and cluster passwords encrypted with AES-256-GCM, SCRAM authentication and allowed networks on every node.
 

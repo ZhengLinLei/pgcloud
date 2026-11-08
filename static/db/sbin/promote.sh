@@ -76,3 +76,11 @@ if [ -n "$sync" ]; then
         && psql -At -U $POSTGRES_USER -d $POSTGRES_DB -p $PGPORT -c "SELECT pg_reload_conf();" >/dev/null \
         && echo "Synchronous replication ($sync) disabled on the new primary ... ok"
 fi
+# Persist the new role in the mounted .env: if this container restarts, the entrypoint must start it
+# as the primary (with NODE_ROLE=replica and no standby.signal it would try to rejoin the old primary).
+if [ -f "$PGCDATA/.env" ]; then
+    tmp=$(mktemp)
+    sed "s|^NODE_ROLE=.*|NODE_ROLE=primary|" "$PGCDATA/.env" > "$tmp" && cat "$tmp" > "$PGCDATA/.env"
+    rm -f "$tmp"
+    echo "Changing NODE_ROLE in physical machine .env file to primary ... ok"
+fi

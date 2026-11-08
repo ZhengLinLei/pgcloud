@@ -89,6 +89,12 @@ function route(path: string, method: string, body: Record<string, unknown> | und
     return st.settings;
   }
   if ((r = m(/^\/api\/settings\/secret\/(\w+)$/))) return { value: 'demo-only-password' };
+  if (path === '/api/watchdog') {
+    const pools = st.nodes.filter((n) => n.type === 'pgpool');
+    if (pools.length < 2) throw new ApiError('The watchdog needs at least two Pgpool-II nodes', 400);
+    const leader = pools[0].address || pools[0].ssh.host;
+    return { leader, nodes: pools.map((p) => ({ host: p.address || p.ssh.host, port: Number(p.config.port ?? 5434), status: (p.address || p.ssh.host) === leader ? 'LEADER' : 'STANDBY' })) };
+  }
   if ((r = m(/^\/api\/deployments\/([^/]+)\/log$/))) return { log: snap.logs[r[1]] ?? '' };
 
   if (path === '/api/nodes' && method === 'POST') {

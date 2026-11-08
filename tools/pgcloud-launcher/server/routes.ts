@@ -33,10 +33,14 @@ import {
   requireSession,
 } from './auth.js';
 import {
+  adoptPrimary,
   containerLogs,
   currentDeployment,
   deployAll,
+  makeWatchdogLeader,
   runNodeAction,
+  switchover,
+  watchdogInfo,
   testNode,
   topology,
   validateTopology,
@@ -144,6 +148,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
     api.post<{ Params: { id: string } }>('/api/nodes/:id/test', async (req) => testNode(req.params.id));
 
+    /** Planned switchover: this replica becomes the primary, the current primary its replica. */
+    api.post<{ Params: { id: string } }>('/api/nodes/:id/switchover', async (req) => switchover(req.params.id));
+
+    /** Make this Pgpool-II node the watchdog leader. */
+    api.post<{ Params: { id: string } }>('/api/nodes/:id/watchdog-leader', async (req) => makeWatchdogLeader(req.params.id));
+
+    api.get('/api/watchdog', async () => watchdogInfo());
+
     api.post<{ Params: { id: string; action: NodeAction } }>('/api/nodes/:id/actions/:action', async (req) => {
       const allowed: NodeAction[] = ['deploy', 'start', 'stop', 'restart', 'remove', 'destroy'];
       if (!allowed.includes(req.params.action)) throw badRequest('Unknown action');
@@ -234,12 +246,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       const primaries = pgs.filter((n) => live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
       if (primaries.length !== 1) throw badRequest(`Expected exactly one running primary, found ${primaries.length}`);
       const p = primaries[0];
-      for (const e of t.edges) {
-        const s = pgs.find((n) => n.id === e.source);
-        const d = pgs.find((n) => n.id === e.target);
-        if (s && d) deleteEdge(e.id);
-      }
-      for (const n of pgs) if (n.id !== p.id) createEdge(n.id, p.id);
+      adoptPrimary(p.id);
       emitEvent('info', `Topology updated to the live roles: ${p.name} is the primary`, p.id);
       broadcast({ type: 'topology' });
       return { primary: p.name };

@@ -5,7 +5,7 @@
 > **To use the project, download the launcher:** [`zhenglinlei/pgcloud-launcher`](https://hub.docker.com/r/zhenglinlei/pgcloud-launcher). It is a web app that lets you draw the cluster, deploys these images to your servers over SSH and monitors them in real time:
 >
 > ```bash
-> docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.1
+> docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.1.0
 > ```
 >
 > Source code, manual and book: https://github.com/ZhengLinLei/pgcloud
@@ -22,7 +22,7 @@ PostgreSQL 18 (based on the official `postgres:18` image, supported until Novemb
 - A former primary that restarts with replica settings rejoins the cluster by itself.
 - `pg_hba.conf` allows only the networks in `ALLOWED_CIDRS`, with `scram-sha-256`. The container refuses to start with placeholder passwords (`change_me`).
 
-Tags: `1.0.1`, `1.0.0`, `1.0`, `latest`. Platforms: `linux/amd64`, `linux/arm64`.
+Tags: `1.1.0`, `1.1`, `latest` (older: `1.0.1`, `1.0.0`, `1.0`). Platforms: `linux/amd64`, `linux/arm64`.
 
 ## Run it by hand
 
@@ -33,7 +33,7 @@ docker run -d --name pgcloud_db --restart unless-stopped --network host \
   --env-file .env \
   -v pgcloud_data:/opt/pgdata \
   -v "$PWD/.env":/opt/pgcloud/.env \
-  zhenglinlei/pgcloud-db:1.0.1
+  zhenglinlei/pgcloud-db:1.1.0
 ```
 
 Mounting the `.env` file is needed: after a failover the scripts update `PRIMARY_HOST`, `PRIMARY_PORT` and `NODE_ROLE` in it.

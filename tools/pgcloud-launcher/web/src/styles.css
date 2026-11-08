@@ -700,3 +700,30 @@ textarea.input {
   color: var(--accent-dim);
   margin-left: 4px;
 }
+
+/* inspector: high availability actions */
+.ha-box {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  background: var(--panel-2);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.ha-box .ha-title {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ha-box p {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ha-box .badge.ok {
+  color: var(--accent);
+}

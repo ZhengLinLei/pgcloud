@@ -23,18 +23,18 @@ A web application to **design, deploy and monitor** PgCloud clusters visually.
 From the repository root (the PgCloud sources are bundled in the image):
 
 ```bash
-docker build -t pgcloud/launcher:1.0.1 -f tools/pgcloud-launcher/Dockerfile .
+docker build -t pgcloud/launcher:1.1.0 -f tools/pgcloud-launcher/Dockerfile .
 docker run -d --name pgcloud-launcher \
   -p 8080:8080 \
   -v pgcloud-launcher:/data \
-  pgcloud/launcher:1.0.1
+  pgcloud/launcher:1.1.0
 docker logs pgcloud-launcher     # prints the generated admin password
 ```
 
 Or use the published image (built by [`.github/workflows/release-images.yml`](../../.github/workflows/release-images.yml) on every GitHub release):
 
 ```bash
-docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.1
+docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.1.0
 ```
 
 Open <http://localhost:8080>. The admin password is also saved in `/data/admin-password.txt`. You can change it in **Settings**, or fix it with `-e LAUNCHER_ADMIN_PASSWORD=...`.
@@ -60,7 +60,7 @@ The launcher must reach every server over **SSH** (deployment) and over the **Po
 
 1. **Settings** → choose the image source:
    - **build** (default): the launcher copies the bundled PgCloud sources to each server over SFTP and runs `docker build` / `podman build` there. Images are labelled with a hash of their sources and rebuilt only when they change. The first build takes a few minutes and the servers need Internet access.
-   - **registry**: `docker pull <registry>/<name>:<tag>` on each server. Selecting it fills in the official images on Docker Hub ([`zhenglinlei`](https://hub.docker.com/u/zhenglinlei)): registry `docker.io/zhenglinlei`, names `pgcloud-db`, `pgcloud-pgpool`, `pgcloud-pgbouncer`, and the launcher version as tag (`1.0.1`). Change them to use your own registry; *Use official images* restores the defaults.
+   - **registry**: `docker pull <registry>/<name>:<tag>` on each server. Selecting it fills in the official images on Docker Hub ([`zhenglinlei`](https://hub.docker.com/u/zhenglinlei)): registry `docker.io/zhenglinlei`, names `pgcloud-db`, `pgcloud-pgpool`, `pgcloud-pgbouncer`, and the launcher version as tag (`1.1.0`). Change them to use your own registry; *Use official images* restores the defaults.
    - **tar.gz**: upload an archive created with `docker save … | gzip`. It is copied over SFTP once per server and loaded only if the image is missing.
    - **on hosts**: the images already exist on the servers (built with `docker/<service>/BUILD.sh`).
 
@@ -92,7 +92,23 @@ After a failover the new primary runs with **asynchronous** replication (otherwi
 
 Planned work never triggers a failover: while the launcher redeploys or restarts PostgreSQL nodes it pauses the Pgpool-II containers and resumes them afterwards.
 
-The complete manual, the illustrated tutorial and the test/benchmark report are in the book: [`docs/wiki/PgCloud_The_Master_Book_v1.0.0.pdf`](../../docs/wiki/PgCloud_The_Master_Book_v1.0.0.pdf).
+The complete manual, the illustrated tutorial and the test/benchmark report are in the book: [`docs/wiki/PgCloud_The_Master_Book_v1.1.0.pdf`](../../docs/wiki/PgCloud_The_Master_Book_v1.1.0.pdf).
+
+## Manual switchover and watchdog leader
+
+Both are one click in the node inspector (Topology → select the node → *High availability*). They run as an operation, with their log in the Deploy tab.
+
+**Make primary** (on a running PostgreSQL replica): a planned switchover, without losing committed transactions.
+
+1. The Pgpool-II nodes are stopped, so none of them starts a failover on its own.
+2. The current primary is stopped cleanly; its last WAL (the shutdown checkpoint) reaches the replicas. The launcher waits until the chosen replica replayed it. If it does not within 60 s, the old primary is started again and nothing changes.
+3. The replica is promoted (`pgcloud_promote`) and the other replicas follow it (`pgcloud_redirect`).
+4. The old primary is resynchronised with `pg_rewind` and starts as a replica of the new one.
+5. The topology is updated (like *Adopt live roles*; PgBouncer nodes connected straight to the old primary move to the new one), the configuration files on every PostgreSQL host are rewritten, Pgpool-II (and those PgBouncer nodes) are redeployed and synchronous replication is restored.
+
+Writes are not accepted while it runs (about a minute in the test servers: 3 PostgreSQL, 3 Pgpool-II, 1 PgBouncer); clients waiting in PgBouncer continue afterwards, other clients must reconnect. In the tests, a client writing through PgBouncer during the switchover committed 392 rows and all of them were on the new primary. Redeploying Pgpool-II also starts a new watchdog election, so check the watchdog leader afterwards if it matters.
+
+**Make watchdog leader** (on a Pgpool-II node, when two or more are deployed): the inspector shows whether the node is the watchdog LEADER or STANDBY. The button restarts the current leader so that the others elect a new one, until the chosen node leads. Clients connected to the restarted node reconnect after a few seconds. Use three or more Pgpool-II nodes: with two, the one left alone has no quorum.
 
 ## Security
 

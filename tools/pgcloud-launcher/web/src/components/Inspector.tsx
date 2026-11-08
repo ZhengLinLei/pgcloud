@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ClusterNode, NodeType, ValidationIssue } from '../../../shared/types';
 import { api, del, formatDuration, patch, post, timeAgo } from '../api';
 import { useStore } from '../store';
-import { CloseIcon, FileIcon, PlayIcon, PlugIcon, RestartIcon, RocketIcon, StopIcon, TerminalIcon, TrashIcon, TYPE_LABEL, TypeIcon } from './icons';
+import { CloseIcon, CrownIcon, FileIcon, PlayIcon, PlugIcon, RestartIcon, RocketIcon, StopIcon, SwitchIcon, TerminalIcon, TrashIcon, TYPE_LABEL, TypeIcon } from './icons';
 import { Confirm, Modal, RoleBadge, StatusBadge, Terminal } from './ui';
 
 type FieldKind = 'number' | 'text' | 'bool' | 'select';
@@ -49,11 +49,45 @@ const FIELDS: Record<NodeType, FieldDef[]> = {
 type Tab = 'config' | 'ssh' | 'live' | 'files';
 
 export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; issues: ValidationIssue[]; role?: string; onClose: () => void }) {
-  const { live, toast, current } = useStore();
+  const { live, toast, current, nodes } = useStore();
   const [tab, setTab] = useState<Tab>('config');
   const nodeLive = live[node.id];
   const busy = !!current;
-  const [confirm, setConfirm] = useState<null | 'destroy' | 'remove' | 'delete'>(null);
+  const [confirm, setConfirm] = useState<null | 'destroy' | 'remove' | 'delete' | 'switchover' | 'leader'>(null);
+
+  // PostgreSQL switchover: offered on a running replica while exactly one primary runs
+  const livePrimary = nodes.filter((n) => n.type === 'postgres' && live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
+  const canSwitchover = node.type === 'postgres' && nodeLive?.status === 'up' && nodeLive.role === 'replica' && livePrimary.length === 1;
+
+  // Pgpool-II watchdog: only with two or more deployed Pgpool-II nodes
+  const deployedPools = nodes.filter((n) => n.type === 'pgpool' && n.deployedAt);
+  const watchdogOn = node.type === 'pgpool' && !!node.deployedAt && deployedPools.length > 1;
+  const [watchdog, setWatchdog] = useState<{ leader: string | null; nodes: Array<{ host: string; status: string }> } | null>(null);
+  const [watchdogError, setWatchdogError] = useState('');
+  useEffect(() => {
+    if (!watchdogOn || current) return;
+    let alive = true;
+    const load = () =>
+      api<{ leader: string | null; nodes: Array<{ host: string; status: string }> }>('/api/watchdog')
+        .then((w) => alive && (setWatchdog(w), setWatchdogError('')))
+        .catch((e) => alive && setWatchdogError((e as Error).message));
+    void load();
+    const t = window.setInterval(load, 10000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [watchdogOn, node.id, current]);
+  const isLeader = !!watchdog && watchdog.leader === node.address;
+
+  const run = async (path: string, what: string) => {
+    try {
+      await post(path);
+      toast(`${what} started — follow it in the Deploy tab`, 'info');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
 
   const action = async (a: string) => {
     try {
@@ -106,6 +140,43 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
         <div className="label" style={{ marginBottom: 8 }}>
           Operations {node.deployedAt && <span className="faint">· deployed {timeAgo(node.deployedAt)}</span>}
         </div>
+        {node.type === 'postgres' && node.deployedAt && (
+          <div className="ha-box">
+            <div className="ha-title">High availability</div>
+            {canSwitchover ? (
+              <>
+                <p className="faint">
+                  Planned switchover: <b>{node.name}</b> becomes the primary and <b>{livePrimary[0].name}</b> one of its replicas. No committed
+                  transaction is lost; the entry point pauses for about a minute.
+                </p>
+                <button className="btn primary" disabled={busy} onClick={() => setConfirm('switchover')}>
+                  <SwitchIcon /> Make primary
+                </button>
+              </>
+            ) : nodeLive?.role === 'primary' ? (
+              <p className="faint">This is the primary. To move the role, select a replica and press “Make primary”.</p>
+            ) : (
+              <p className="faint">A switchover needs this node running as a replica and exactly one running primary.</p>
+            )}
+          </div>
+        )}
+        {watchdogOn && (
+          <div className="ha-box">
+            <div className="ha-title">
+              Pgpool-II watchdog{' '}
+              {watchdog && <span className={`badge ${isLeader ? 'ok' : ''}`}>{isLeader ? 'LEADER' : 'STANDBY'}</span>}
+            </div>
+            {watchdogError && <p className="err">{watchdogError}</p>}
+            {watchdog && !isLeader && (
+              <p className="faint">
+                Leader now: <b>{nodes.find((n) => n.type === 'pgpool' && n.address === watchdog.leader)?.name ?? watchdog.leader ?? 'none'}</b>
+              </p>
+            )}
+            <button className="btn" disabled={busy || isLeader || !watchdog} onClick={() => setConfirm('leader')}>
+              <CrownIcon /> Make watchdog leader
+            </button>
+          </div>
+        )}
         <div className="btn-row">
           <button className="btn primary" disabled={busy} onClick={() => action('deploy')}>
             <RocketIcon /> {node.deployedAt ? 'Redeploy' : 'Deploy'}
@@ -127,6 +198,43 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
           </button>
         </div>
       </div>
+      {confirm === 'switchover' && livePrimary[0] && (
+        <Confirm
+          title="Switchover"
+          message={
+            <>
+              <p style={{ marginTop: 0 }}>
+                <b>{node.name}</b> becomes the primary and <b>{livePrimary[0].name}</b> becomes its replica. The launcher:
+              </p>
+              <ol style={{ margin: '0 0 0 18px', padding: 0, lineHeight: 1.6 }}>
+                <li>pauses Pgpool-II, so no failover starts on its own;</li>
+                <li>stops {livePrimary[0].name} cleanly and waits until {node.name} replayed all its WAL;</li>
+                <li>promotes {node.name} and points the other replicas at it;</li>
+                <li>resyncs {livePrimary[0].name} with pg_rewind and starts it as a replica;</li>
+                <li>updates the topology, redeploys Pgpool-II and restores synchronous replication.</li>
+              </ol>
+              <p className="faint" style={{ marginBottom: 0 }}>Writes are not accepted for about a minute. Clients must reconnect.</p>
+            </>
+          }
+          confirmText="Switch over"
+          onConfirm={() => run(`/api/nodes/${node.id}/switchover`, `Switchover to ${node.name}`)}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+      {confirm === 'leader' && (
+        <Confirm
+          title="Watchdog leader"
+          message={
+            <>
+              The current leader is restarted so that the other Pgpool-II nodes elect a new one, until <b>{node.name}</b> leads. Clients connected
+              to the restarted node lose their connection for a few seconds.
+            </>
+          }
+          confirmText="Make leader"
+          onConfirm={() => run(`/api/nodes/${node.id}/watchdog-leader`, `Watchdog leader ${node.name}`)}
+          onClose={() => setConfirm(null)}
+        />
+      )}
       {confirm === 'remove' && (
         <Confirm
           title="Remove container"

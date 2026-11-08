@@ -5,7 +5,7 @@
 > **To use the project, download the launcher:** [`zhenglinlei/pgcloud-launcher`](https://hub.docker.com/r/zhenglinlei/pgcloud-launcher). It is a web app that lets you draw the cluster, deploys these images to your servers over SSH and monitors them in real time:
 >
 > ```bash
-> docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.0.1
+> docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.1.0
 > ```
 >
 > Source code, manual and book: https://github.com/ZhengLinLei/pgcloud
@@ -22,7 +22,7 @@ Pgpool-II 4.7 and the PostgreSQL 18 client (from the official PostgreSQL apt rep
 - **Watchdog**: several Pgpool-II nodes can watch each other.
 - Client authentication with `scram-sha-256` (password stored AES-encrypted in `pool_passwd`), allowed networks only (`pool_hba.conf`).
 
-Tags: `1.0.1`, `1.0.0`, `1.0`, `latest`. Platforms: `linux/amd64`, `linux/arm64`.
+Tags: `1.1.0`, `1.1`, `latest` (older: `1.0.1`, `1.0.0`, `1.0`). Platforms: `linux/amd64`, `linux/arm64`.
 
 ## Run it by hand
 
@@ -38,7 +38,7 @@ docker run -d --name pgcloud_pool --restart unless-stopped --network host \
   -v "$PWD/.env":/opt/pgcloud/.env \
   -v "$PWD/conf/pgpool":/opt/pgcloud/conf/pgpool \
   -v "$PWD/conf/postgres":/opt/pgcloud/conf/postgres \
-  zhenglinlei/pgcloud-pgpool:1.0.1
+  zhenglinlei/pgcloud-pgpool:1.1.0
 ```
 
 The PostgreSQL containers must be named `pgcloud_db`: the failover commands run `docker exec pgcloud_db …` on each database host.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 — 2026-11-07
+
+### Added
+- **Manual switchover** in the launcher: *Make primary* on a PostgreSQL replica makes it the primary and the current primary its replica, in one click and without losing committed transactions (Pgpool-II paused, clean stop, promote, redirect, `pg_rewind`, topology and Pgpool-II updated, synchronous replication restored).
+- **Pgpool-II watchdog leader**: the inspector shows LEADER / STANDBY and *Make watchdog leader* moves the leadership to the chosen node.
+- *PgCloud - The Master Book* v1.1.0 (`docs/wiki`): root scripts, switchover and watchdog in the manual (4.7.4) and the tutorial (5.10), test results in section 6.6.
+
+### Fixed
+- A promoted node kept `NODE_ROLE=replica` in its container environment. After a restart, the entrypoint could try to rejoin the old primary. `pgcloud_promote` now records `NODE_ROLE=primary` in the mounted `.env`, the entrypoint reads the role from that file, and it never rejoins a host that is itself a replica.
+- **A Pgpool-II node added later never joined the watchdog** ("Add to watchdog cluster request is rejected") and restarted in a loop: deploying one Pgpool-II node left the others with the old member list. Deploying a Pgpool-II node now redeploys every deployed Pgpool-II node, and the launcher warns about any deployed node whose configuration no longer matches the topology ("Redeploy it").
+
 ## 1.0.1 — 2026-11-07
 
 ### Fixed

@@ -180,7 +180,7 @@ export type WsMessage =
 
 export const NODE_TYPES: NodeType[] = ['postgres', 'pgpool', 'pgbouncer'];
 
-export const APP_VERSION = '1.0.1';
+export const APP_VERSION = '1.1.0';
 
 /** Image names used by the "build", "tar.gz" and "on hosts" sources. */
 export const LOCAL_IMAGES = {

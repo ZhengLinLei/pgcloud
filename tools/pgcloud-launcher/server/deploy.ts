@@ -1,9 +1,12 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 import { CONTAINER_NAME, type ClusterNode, type Deployment } from '../shared/types.js';
 import {
   appendDeploymentLog,
   createDeployment,
+  createEdge,
+  deleteEdge,
   finishDeployment,
   getClusterSecrets,
   getNode,
@@ -16,7 +19,7 @@ import {
 } from './db.js';
 import { broadcast, emitEvent } from './hub.js';
 import { detectRuntime, q, withSsh, type SshSession } from './ssh.js';
-import { computeRoles, generateFiles, imageRef, validate, type Topology } from './topology.js';
+import { computeRoles, generateFiles, imageRef, targetsOf, validate, type Topology } from './topology.js';
 import { paths } from './env.js';
 import { liveSnapshot } from './monitor.js';
 import { buildContext, SERVICE_DIR } from './sources.js';
@@ -36,7 +39,42 @@ export function topology(): Topology {
 export function validateTopology() {
   const live = liveSnapshot();
   const roles = Object.fromEntries(Object.entries(live).filter(([, l]) => l.status === 'up').map(([id, l]) => [id, l.role]));
-  return validate(topology(), getSettings(), getNodeSsh, getClusterSecrets(), roles);
+  const v = validate(topology(), getSettings(), getNodeSsh, getClusterSecrets(), roles);
+  // Deployed nodes whose configuration no longer matches the topology (e.g. a node added later)
+  for (const n of topology().nodes) {
+    const stored = kv.get<string>(`cfg:${n.id}`);
+    if (!n.deployedAt || !stored) continue;
+    let current: string;
+    try {
+      current = configHash(n);
+    } catch {
+      continue;
+    }
+    if (current !== stored) {
+      v.issues.push({
+        level: 'warning',
+        nodeId: n.id,
+        code: 'stale',
+        message:
+          n.type === 'pgpool'
+            ? `${n.name}: deployed with an older topology (backends or watchdog members changed). Redeploy it: all Pgpool-II nodes must share the same configuration.`
+            : `${n.name}: the topology changed since it was deployed. Redeploy it to apply the change.`,
+      });
+    }
+  }
+  return v;
+}
+
+/** Hash of the configuration files the topology generates for a node (compared with the deployed one). */
+function configHash(node: ClusterNode): string {
+  const t = topology();
+  const { files } = generateFiles(node, { topology: t, settings: getSettings(), secrets: getClusterSecrets(), sshOf: getNodeSsh, dbRuntime: dbRuntimeFor(t) });
+  return hashFiles(files);
+}
+function hashFiles(files: Record<string, string>): string {
+  const h = crypto.createHash('sha256');
+  for (const k of Object.keys(files).sort()) h.update(`${k}\0${files[k]}\0`);
+  return h.digest('hex');
 }
 
 export function runtimeOf(nodeId: string): 'docker' | 'podman' | undefined {
@@ -267,6 +305,7 @@ async function deployNode(node: ClusterNode, log: Logger): Promise<void> {
       await s.writeFile(path.posix.join(dir, rel), content, 0o600);
       log.line(`Wrote ${path.posix.join(dir, rel)}`);
     }
+    kv.set(`cfg:${node.id}`, hashFiles(files));
 
     await s.exec(`${rt} rm -f -v ${CONTAINER_NAME[node.type]} >/dev/null 2>&1`, { sudo: true });
     const hasLocaltime = (await s.exec('test -f /etc/localtime')).code === 0;
@@ -345,36 +384,40 @@ async function syncReplication(log: Logger): Promise<void> {
  */
 async function withPgpoolPaused<T>(log: Logger, fn: () => Promise<T>): Promise<T> {
   const pools = listNodes().filter((n) => n.type === 'pgpool' && n.deployedAt);
-  const paused: ClusterNode[] = [];
-  for (const p of pools) {
-    try {
-      await withSsh(getNodeSsh(p.id), async (s) => {
-        const rt = runtimeOf(p.id) ?? (await detectRuntime(s, getSettings().runtime)).bin;
-        log.line(`Pausing ${p.name} during planned maintenance (avoids an unwanted failover)`, 'cmd');
-        await s.exec(`${rt} stop -t 10 ${CONTAINER_NAME.pgpool}`, { sudo: true });
-      });
-      paused.push(p);
-    } catch (e) {
-      log.line(`Could not pause ${p.name}: ${(e as Error).message}`, 'warn');
-    }
-  }
+  // All at once: one by one, a Pgpool-II still running could fail over while the others stop
+  const results = await Promise.all(
+    pools.map(async (p) => {
+      try {
+        await onNode(p, async (s, rt) => {
+          log.line(`Pausing ${p.name} during planned maintenance (avoids an unwanted failover)`, 'cmd');
+          await s.exec(`${rt} stop -t 10 ${CONTAINER_NAME.pgpool}`, { sudo: true });
+        });
+        return p;
+      } catch (e) {
+        log.line(`Could not pause ${p.name}: ${(e as Error).message}`, 'warn');
+        return null;
+      }
+    }),
+  );
+  const paused = results.filter((p): p is ClusterNode => !!p);
   try {
     return await fn();
   } finally {
-    for (const p of paused) {
-      try {
-        await withSsh(getNodeSsh(p.id), async (s) => {
-          const rt = runtimeOf(p.id) ?? (await detectRuntime(s, getSettings().runtime)).bin;
-          const state = (await s.exec(`${rt} inspect -f '{{.State.Status}}' ${CONTAINER_NAME.pgpool}`, { sudo: true })).stdout.trim();
-          if (state !== 'running') {
-            log.line(`Resuming ${p.name}`, 'cmd');
-            await s.run(`${rt} start ${CONTAINER_NAME.pgpool}`, { sudo: true });
-          }
-        });
-      } catch (e) {
-        log.line(`Could not resume ${p.name}: ${(e as Error).message}`, 'error');
-      }
-    }
+    await Promise.all(
+      paused.map(async (p) => {
+        try {
+          await onNode(p, async (s, rt) => {
+            const state = (await s.exec(`${rt} inspect -f '{{.State.Status}}' ${CONTAINER_NAME.pgpool}`, { sudo: true })).stdout.trim();
+            if (state !== 'running') {
+              log.line(`Resuming ${p.name}`, 'cmd');
+              await s.run(`${rt} start ${CONTAINER_NAME.pgpool}`, { sudo: true });
+            }
+          });
+        } catch (e) {
+          log.line(`Could not resume ${p.name}: ${(e as Error).message}`, 'error');
+        }
+      }),
+    );
   }
 }
 
@@ -385,6 +428,14 @@ export function runNodeAction(nodeId: string, action: NodeAction): Deployment {
     const v = validateTopology();
     const blocking = v.issues.filter((i) => i.level === 'error' && (!i.nodeId || i.nodeId === nodeId));
     if (blocking.length) throw Object.assign(new Error(blocking.map((i) => i.message).join('\n')), { statusCode: 400 });
+    if (node.type === 'pgpool') {
+      // The watchdog only accepts members with the same configuration: (re)deploy every Pgpool-II node together
+      const pools = [node, ...listNodes().filter((n) => n.type === 'pgpool' && n.deployedAt && n.id !== node.id)];
+      return startJob('deploy', pools.map((p) => p.name).join(', '), async (log) => {
+        if (pools.length > 1) log.line(`Pgpool-II nodes share the watchdog and backend configuration: deploying ${pools.map((p) => p.name).join(', ')}`);
+        for (const p of pools) await deployNode(p, log);
+      });
+    }
     return startJob('deploy', node.name, (log) =>
       node.type === 'postgres' ? withPgpoolPaused(log, () => deployNode(node, log)) : deployNode(node, log),
     );
@@ -438,4 +489,269 @@ export async function testNode(nodeId: string): Promise<{ ok: boolean; message: 
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }
+}
+
+// ------------------------------------------------------------------ manual switchover / watchdog leader
+
+const fail = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Run `fn` over SSH on a node, with its container runtime binary. */
+async function onNode<T>(node: ClusterNode, fn: (s: SshSession, rt: string) => Promise<T>): Promise<T> {
+  return withSsh(getNodeSsh(node.id), async (s) => fn(s, runtimeOf(node.id) ?? (await detectRuntime(s, getSettings().runtime)).bin));
+}
+
+/** psql inside the PostgreSQL container of a node (local socket, cluster superuser). */
+function psqlCmd(rt: string, sql: string): string {
+  const c = getSettings().cluster;
+  return `${rt} exec ${CONTAINER_NAME.postgres} psql -At -U ${q(c.user)} -d ${q(c.database)} -c ${q(sql)}`;
+}
+
+async function pgQuery(node: ClusterNode, sql: string): Promise<string> {
+  return onNode(node, async (s, rt) => {
+    const r = await s.exec(psqlCmd(rt, sql), { sudo: true });
+    if (r.code !== 0) throw new Error(`${node.name}: ${(r.stderr || r.stdout).trim()}`);
+    return r.stdout.trim();
+  });
+}
+
+const pgPort = (n: ClusterNode) => Number((n.config as Record<string, unknown>).port);
+
+/**
+ * Make `primary` the only PostgreSQL primary in the topology: every other PostgreSQL node becomes its
+ * replica and PgBouncer nodes that pointed straight at the old primary now point at the new one.
+ */
+export function adoptPrimary(primaryId: string): void {
+  const t = topology();
+  const pgs = t.nodes.filter((n) => n.type === 'postgres');
+  const old = t.nodes.filter((n) => n.type === 'postgres' && computeRoles(t)[n.id] === 'primary' && n.id !== primaryId);
+  for (const e of t.edges) {
+    const s = pgs.find((n) => n.id === e.source);
+    const d = pgs.find((n) => n.id === e.target);
+    if (s && d) deleteEdge(e.id);
+  }
+  for (const n of pgs) if (n.id !== primaryId) createEdge(n.id, primaryId);
+  for (const e of t.edges) {
+    const src = t.nodes.find((n) => n.id === e.source);
+    if (src?.type === 'pgbouncer' && old.some((o) => o.id === e.target)) {
+      deleteEdge(e.id);
+      if (!t.edges.some((x) => x.source === src.id && x.target === primaryId)) createEdge(src.id, primaryId);
+    }
+  }
+}
+
+/** Write the generated configuration of a node to its host without touching the container. */
+async function writeNodeFiles(node: ClusterNode, log: Logger): Promise<void> {
+  const t = topology();
+  await onNode(node, async (s) => {
+    const dir = await nodeDir(s, node);
+    const { files } = generateFiles(node, { topology: t, settings: getSettings(), secrets: getClusterSecrets(), sshOf: getNodeSsh, dbRuntime: dbRuntimeFor(t) });
+    for (const [rel, content] of Object.entries(files)) {
+      if (rel.endsWith('.keep')) continue;
+      await s.writeFile(path.posix.join(dir, rel), content, 0o600);
+    }
+    kv.set(`cfg:${node.id}`, hashFiles(files));
+  });
+  log.line(`${node.name}: configuration files updated`);
+}
+
+/**
+ * Planned switchover: `targetId` (a streaming replica) becomes the primary and the current primary
+ * becomes its replica, without losing committed transactions:
+ *   pause Pgpool-II → stop the primary cleanly (its last WAL reaches the replicas) → wait until the
+ *   target replayed it → promote the target → point the other replicas at it → resync the old primary
+ *   with pg_rewind and start it as a replica → update the topology → redeploy Pgpool-II (and
+ *   PgBouncer nodes connected straight to PostgreSQL) → restore synchronous replication.
+ */
+export function switchover(targetId: string): Deployment {
+  const target = getNode(targetId);
+  if (!target || target.type !== 'postgres') throw fail('Choose a PostgreSQL node');
+  const live = liveSnapshot();
+  const pgs = listNodes().filter((n) => n.type === 'postgres');
+  const primaries = pgs.filter((n) => live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
+  if (primaries.length !== 1) throw fail(`Expected exactly one running primary, found ${primaries.length}`);
+  const oldPrimary = primaries[0];
+  if (oldPrimary.id === target.id) throw fail(`${target.name} is already the primary`);
+  if (live[target.id]?.status !== 'up' || live[target.id]?.role !== 'replica') throw fail(`${target.name} must be a running replica`);
+  const down = pgs.filter((n) => n.deployedAt && live[n.id]?.status !== 'up');
+  if (down.length) throw fail(`These PostgreSQL nodes are not running: ${down.map((n) => n.name).join(', ')}`);
+  const others = pgs.filter((n) => n.id !== target.id && n.id !== oldPrimary.id && live[n.id]?.status === 'up');
+
+  return startJob('switchover', `${oldPrimary.name} → ${target.name}`, async (log) => {
+    emitEvent('info', `Switchover started: ${oldPrimary.name} → ${target.name}`, target.id);
+    const lag = await pgQuery(target, "SELECT status FROM pg_stat_wal_receiver");
+    if (lag !== 'streaming') throw new Error(`${target.name} is not streaming from the primary (${lag || 'no WAL receiver'})`);
+
+    let promoted = false;
+    await withPgpoolPaused(log, async () => {
+      // 1. stop the primary cleanly: the shutdown checkpoint is streamed to the replicas
+      let checkpoint = '';
+      await onNode(oldPrimary, async (s, rt) => {
+        log.line(`${oldPrimary.name}: stopping cleanly (no writes are accepted from now on)`, 'cmd');
+        await s.run(`${rt} stop -t 60 ${CONTAINER_NAME.postgres}`, { sudo: true });
+        const image = (await s.exec(`${rt} inspect -f '{{.Config.Image}}' ${CONTAINER_NAME.postgres}`, { sudo: true })).stdout.trim();
+        const ctl = await s.run(
+          `${rt} run --rm --volumes-from ${CONTAINER_NAME.postgres} --entrypoint pg_controldata ${q(image)} -D /opt/pgdata`,
+          { sudo: true },
+        );
+        checkpoint = /Latest checkpoint location:\s*(\S+)/.exec(ctl)?.[1] ?? '';
+      });
+      if (!checkpoint) throw new Error(`${oldPrimary.name}: could not read its last checkpoint`);
+      log.line(`${oldPrimary.name}: stopped at WAL ${checkpoint}`, 'ok');
+
+      try {
+        // 2. wait until the target replayed everything
+        const start = Date.now();
+        for (;;) {
+          const caught = await pgQuery(target, `SELECT pg_wal_lsn_diff(pg_last_wal_replay_lsn(), '${checkpoint}') >= 0`);
+          if (caught === 't') break;
+          if (Date.now() - start > 60_000) throw new Error(`${target.name} did not replay WAL ${checkpoint} within 60 s`);
+          await sleep(1000);
+        }
+        log.line(`${target.name}: replayed every transaction of ${oldPrimary.name}`, 'ok');
+
+        // 3. promote the target
+        await onNode(target, async (s, rt) => {
+          log.line(`${target.name}: pgcloud_promote`, 'cmd');
+          await s.run(
+            `${rt} exec ${CONTAINER_NAME.postgres} pgcloud_promote ${target.address} ${pgPort(target)} ${oldPrimary.address} ${pgPort(oldPrimary)}`,
+            { sudo: true, onData: log.stream() },
+          );
+        });
+        for (let i = 0; i < 30 && (await pgQuery(target, 'SELECT pg_is_in_recovery()')) !== 'f'; i++) await sleep(1000);
+        if ((await pgQuery(target, 'SELECT pg_is_in_recovery()')) !== 'f') throw new Error(`${target.name} did not leave recovery`);
+        promoted = true;
+        log.line(`${target.name} is the new primary`, 'ok');
+      } catch (e) {
+        if (!promoted) {
+          log.line(`Rolling back: starting ${oldPrimary.name} again as the primary`, 'warn');
+          await onNode(oldPrimary, (s, rt) => s.run(`${rt} start ${CONTAINER_NAME.postgres}`, { sudo: true }));
+        }
+        throw e;
+      }
+
+      // 4. the other replicas follow the new primary
+      for (const r of others) {
+        await onNode(r, async (s, rt) => {
+          log.line(`${r.name}: pgcloud_redirect → ${target.name}`, 'cmd');
+          await s.run(
+            `${rt} exec ${CONTAINER_NAME.postgres} pgcloud_redirect ${target.address} ${pgPort(target)} ${oldPrimary.address} ${pgPort(oldPrimary)}`,
+            { sudo: true, onData: log.stream() },
+          );
+        });
+      }
+
+      // 5. the old primary becomes a replica of the new one
+      await onNode(oldPrimary, async (s, rt) => {
+        const image = (await s.exec(`${rt} inspect -f '{{.Config.Image}}' ${CONTAINER_NAME.postgres}`, { sudo: true })).stdout.trim();
+        log.line(`${oldPrimary.name}: pgcloud_rewind → replica of ${target.name}`, 'cmd');
+        await s.run(
+          `${rt} run --rm --network host --volumes-from ${CONTAINER_NAME.postgres} --entrypoint pgcloud_rewind ${q(image)} ${target.address} ${pgPort(target)}`,
+          { sudo: true, onData: log.stream() },
+        );
+        await s.run(`${rt} start ${CONTAINER_NAME.postgres}`, { sudo: true });
+        await waitHealthy(s, rt, oldPrimary, log, 180);
+      });
+      for (let i = 0; i < 30; i++) {
+        if ((await pgQuery(oldPrimary, "SELECT status FROM pg_stat_wal_receiver").catch(() => '')) === 'streaming') break;
+        await sleep(1000);
+      }
+      log.line(`${oldPrimary.name} is streaming from ${target.name}`, 'ok');
+
+      // 6. topology + configuration files follow the new roles
+      adoptPrimary(target.id);
+      broadcast({ type: 'topology' });
+      for (const n of listNodes().filter((x) => x.type === 'postgres' && x.deployedAt)) await writeNodeFiles(n, log);
+
+      // 7. Pgpool-II (and PgBouncer nodes in front of PostgreSQL) get the new backend list
+      const t = topology();
+      for (const n of t.nodes.filter((x) => x.deployedAt && (x.type === 'pgpool' || (x.type === 'pgbouncer' && targetsOf(t, x.id).some((d) => d.type === 'postgres'))))) {
+        await deployNode(n, log);
+      }
+    });
+    await syncReplication(log).catch((e) => log.line(`Could not set synchronous replication: ${(e as Error).message}`, 'warn'));
+    emitEvent('success', `Switchover finished: ${target.name} is the primary, ${oldPrimary.name} a replica`, target.id);
+  });
+}
+
+/** Watchdog state of the Pgpool-II cluster, as seen by one running Pgpool-II node. */
+export async function watchdogInfo(): Promise<{ leader: string | null; nodes: Array<{ host: string; port: number; status: string }> }> {
+  const pools = listNodes().filter((n) => n.type === 'pgpool' && n.deployedAt);
+  let lastError = 'no deployed Pgpool-II node';
+  for (const p of pools) {
+    try {
+      const out = await onNode(p, async (s, rt) => {
+        const r = await s.exec(`${rt} exec ${CONTAINER_NAME.pgpool} ./script/getrole.sh`, { sudo: true });
+        if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim() || 'pcp_watchdog_info failed');
+        return r.stdout;
+      });
+      return parseWatchdog(out);
+    } catch (e) {
+      lastError = `${p.name}: ${(e as Error).message}`;
+    }
+  }
+  throw fail(lastError, 502);
+}
+
+/** Parse `pcp_watchdog_info -v`. */
+export function parseWatchdog(out: string): { leader: string | null; nodes: Array<{ host: string; port: number; status: string }> } {
+  const leader = /Leader Host Name\s*:\s*(\S+)/.exec(out)?.[1] ?? null;
+  const nodes: Array<{ host: string; port: number; status: string }> = [];
+  const section = out.split(/Watchdog Node Information/)[1] ?? '';
+  for (const block of section.split(/\nNode Name\s*:/).slice(1)) {
+    const host = /Host Name\s*:\s*(\S+)/.exec(block)?.[1];
+    const port = Number(/Pgpool port\s*:\s*(\d+)/.exec(block)?.[1] ?? 0);
+    const status = /Status Name\s*:\s*(\S+)/.exec(block)?.[1] ?? 'UNKNOWN';
+    if (host) nodes.push({ host, port, status });
+  }
+  return { leader, nodes };
+}
+
+/**
+ * Make a Pgpool-II node the watchdog leader: restart the current leader so the other nodes elect a new
+ * one, until `targetId` wins (clients of the restarted node reconnect after a few seconds).
+ */
+export function makeWatchdogLeader(targetId: string): Deployment {
+  const target = getNode(targetId);
+  if (!target || target.type !== 'pgpool') throw fail('Choose a Pgpool-II node');
+  const pools = listNodes().filter((n) => n.type === 'pgpool' && n.deployedAt);
+  if (pools.length < 2) throw fail('The watchdog needs at least two deployed Pgpool-II nodes');
+  if (!target.deployedAt) throw fail(`${target.name} is not deployed`);
+
+  // Pgpool-II may still be starting (e.g. right after another operation resumed it)
+  const readWatchdog = async () => {
+    for (let i = 0; ; i++) {
+      try {
+        return await watchdogInfo();
+      } catch (e) {
+        if (i >= 15) throw e;
+        await sleep(2000);
+      }
+    }
+  };
+
+  return startJob('watchdog leader', target.name, async (log) => {
+    for (let attempt = 1; attempt <= pools.length; attempt++) {
+      const info = await readWatchdog();
+      const leaderNode = pools.find((p) => p.address === info.leader);
+      log.line(`Watchdog leader: ${leaderNode?.name ?? info.leader ?? 'none'}`);
+      if (leaderNode?.id === target.id) {
+        emitEvent('success', `${target.name} is the Pgpool-II watchdog leader`, target.id);
+        return;
+      }
+      if (!leaderNode) throw new Error('No watchdog leader found: is the watchdog enabled on every Pgpool-II node?');
+      await onNode(leaderNode, async (s, rt) => {
+        log.line(`${leaderNode.name}: restarting so that another node takes the lead`, 'cmd');
+        await s.run(`${rt} restart -t 10 ${CONTAINER_NAME.pgpool}`, { sudo: true });
+      });
+      // election + rejoin of the restarted node
+      for (let i = 0; i < 30; i++) {
+        await sleep(2000);
+        const now = await watchdogInfo().catch(() => null);
+        if (now?.leader && now.leader !== leaderNode.address && now.nodes.every((n) => n.status === 'LEADER' || n.status === 'STANDBY')) break;
+      }
+    }
+    const info = await readWatchdog();
+    throw new Error(`${target.name} did not become the leader (leader: ${info.leader ?? 'none'})`);
+  });
 }
