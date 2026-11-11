@@ -1,5 +1,13 @@
 # Changelog
 
+
+## 1.2.0 - 2026-11-09
+
+### Added
+
+- **The topology follows a failover by itself**: when Pgpool-II serves a new primary, the launcher redraws the replication links (no more replicas drawn on the old primary) and rewrites the PostgreSQL configuration files it can reach.
+- **Old primaries never start as a second primary**: at start, a node configured as primary checks the other nodes (`PEER_HOSTS`); if one is primary on a newer timeline, this node is an old primary. Settings → *Old primary that comes back*: **rejoin automatically** (pg_rewind, fresh copy if that fails) or **wait for me** (it does not start). The launcher flags old primaries and replicas that do not stream, with **Rejoin as replica** and **Rebuild (fresh copy)** in the node inspector. `pgcloud_rewind --clone` forces a fresh copy.
+
 ## 1.1.0 — 2026-11-07
 
 ### Added

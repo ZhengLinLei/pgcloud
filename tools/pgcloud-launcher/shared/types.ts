@@ -106,7 +106,13 @@ export interface SettingsView {
   runtime: RuntimeChoice;
   remoteDir: string;
   monitorIntervalSec: number;
+  /** An old primary that starts while another node is primary: rejoin it as a replica, or wait for the operator. */
+  oldPrimary: OldPrimaryPolicy;
+  /** Repair safe problems by itself: rejoin old primaries (when oldPrimary = rejoin) and re-attach healthy nodes in Pgpool-II. */
+  autoHeal: boolean;
 }
+
+export type OldPrimaryPolicy = 'rejoin' | 'wait';
 
 export interface SettingsInput {
   cluster?: Partial<SettingsView['cluster']> & { password?: string; replicaPassword?: string; pcpPassword?: string };
@@ -114,6 +120,8 @@ export interface SettingsInput {
   runtime?: RuntimeChoice;
   remoteDir?: string;
   monitorIntervalSec?: number;
+  oldPrimary?: OldPrimaryPolicy;
+  autoHeal?: boolean;
 }
 
 export interface ValidationIssue {

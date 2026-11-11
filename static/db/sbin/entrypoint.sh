@@ -425,7 +425,7 @@ _main() {
 			# The failover scripts record role changes in the mounted .env (root-only), while the
 			# container environment keeps the values from its creation. Use the current ones.
 			if [ -f "$PGCDATA/.env" ]; then
-				for key in NODE_ROLE PRIMARY_HOST PRIMARY_PORT; do
+				for key in NODE_ROLE PRIMARY_HOST PRIMARY_PORT PEER_HOSTS STALE_PRIMARY; do
 					value=$(sed -n "s/^$key=//p" "$PGCDATA/.env" | tail -1)
 					[ -n "$value" ] && export "$key=$value"
 				done
@@ -552,18 +552,48 @@ _main() {
 				PostgreSQL Database directory appears to contain a database; Skipping initialization
 
 			EOM
-			# Self-healing: a node configured as replica must never start with the data of a primary
-			# (e.g. an old primary redeployed after a failover would create a second primary).
-			if [ "$NODE_ROLE" = "replica" ] && [ ! -f "$PGDATA/standby.signal" ] && [ -n "$PRIMARY_HOST" ] \
-				&& [ "$(PGPASSWORD="$POSTGRES_PASSWORD" PGCONNECT_TIMEOUT=5 psql -h "$PRIMARY_HOST" -p "${PRIMARY_PORT:-5432}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc 'SELECT pg_is_in_recovery()' 2>/dev/null)" = "t" ]; then
-				# PRIMARY_HOST is itself a replica: this node is the real primary (role not recorded yet)
-				pglog "NODE_ROLE=replica but $PRIMARY_HOST:$PRIMARY_PORT is a replica: starting as the primary"
-			elif [ "$NODE_ROLE" = "replica" ] && [ ! -f "$PGDATA/standby.signal" ] && [ -n "$PRIMARY_HOST" ]; then
-				pglog "Replica role but primary data found: rejoining $PRIMARY_HOST:$PRIMARY_PORT (pg_rewind / pg_basebackup)"
-				"$PGCDATA/sbin/rewind.sh" "$PRIMARY_HOST" "$PRIMARY_PORT" || {
-					pglog "Could not rejoin $PRIMARY_HOST:$PRIMARY_PORT; refusing to start as a second primary"
+			# Self-healing: a node must never start as a second primary.
+			#  a) NODE_ROLE=replica but the data is a primary's (old primary redeployed after a failover)
+			#  b) NODE_ROLE=primary but another node is primary on a newer timeline (this node was the
+			#     primary, failed, and a replica was promoted while it was down)
+			# What to do is STALE_PRIMARY: "rejoin" (default) = become a replica of the current primary
+			# (pg_rewind, or a fresh copy if that fails); "wait" = do not start, the operator decides.
+			pg_query() { PGPASSWORD="$POSTGRES_PASSWORD" PGCONNECT_TIMEOUT=5 psql -h "$1" -p "$2" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$3" 2>/dev/null; }
+			rejoin_target=""
+			if [ ! -f "$PGDATA/standby.signal" ]; then
+				if [ "$NODE_ROLE" = "replica" ] && [ -n "$PRIMARY_HOST" ]; then
+					if [ "$(pg_query "$PRIMARY_HOST" "${PRIMARY_PORT:-5432}" 'SELECT pg_is_in_recovery()')" = "t" ]; then
+						# PRIMARY_HOST is itself a replica: this node is the real primary (role not recorded yet)
+						pglog "NODE_ROLE=replica but $PRIMARY_HOST:$PRIMARY_PORT is a replica: starting as the primary"
+					else
+						rejoin_target="$PRIMARY_HOST:${PRIMARY_PORT:-5432}"
+						pglog "Replica role but primary data found: must rejoin $rejoin_target"
+					fi
+				elif [ -n "$PEER_HOSTS" ]; then
+					my_tl=$(pg_controldata -D "$PGDATA" 2>/dev/null | sed -n "s/^Latest checkpoint's TimeLineID: *//p")
+					for peer in ${PEER_HOSTS//,/ }; do
+						# current timeline of a running primary (from its WAL file name); empty on replicas / unreachable
+						tl=$(pg_query "${peer%:*}" "${peer##*:}" "SELECT CASE WHEN pg_is_in_recovery() THEN '' ELSE ('x' || substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8))::bit(32)::int::text END")
+						if [ -n "$tl" ] && [ -n "$my_tl" ] && [ "$tl" -gt "$my_tl" ]; then
+							rejoin_target="$peer"
+							pglog "Another primary is running on a newer timeline: $peer (timeline $tl, this node $my_tl). This node is an old primary"
+							break
+						fi
+					done
+				fi
+			fi
+			if [ -n "$rejoin_target" ]; then
+				if [ "${STALE_PRIMARY:-rejoin}" = "wait" ]; then
+					pglog "STALE_PRIMARY=wait: NOT starting (it would be a second primary). Rejoin it from the launcher (Rejoin as replica / Rebuild) or run pgcloud_rewind ${rejoin_target%:*} ${rejoin_target##*:}"
+					sleep 60
+					exit 1
+				fi
+				pglog "Rejoining $rejoin_target as a replica (pg_rewind / pg_basebackup)"
+				"$PGCDATA/sbin/rewind.sh" "${rejoin_target%:*}" "${rejoin_target##*:}" || {
+					pglog "Could not rejoin $rejoin_target; refusing to start as a second primary"
 					exit 1
 				}
+				export NODE_ROLE=replica PRIMARY_HOST="${rejoin_target%:*}" PRIMARY_PORT="${rejoin_target##*:}"
 			fi
 		fi
 	fi

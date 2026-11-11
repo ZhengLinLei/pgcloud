@@ -21,7 +21,7 @@ import { broadcast, emitEvent } from './hub.js';
 import { detectRuntime, q, withSsh, type SshSession } from './ssh.js';
 import { computeRoles, generateFiles, imageRef, targetsOf, validate, type Topology } from './topology.js';
 import { paths } from './env.js';
-import { liveSnapshot } from './monitor.js';
+import { liveSnapshot, onSnapshot } from './monitor.js';
 import { buildContext, SERVICE_DIR } from './sources.js';
 
 export type NodeAction = 'deploy' | 'start' | 'stop' | 'restart' | 'remove' | 'destroy';
@@ -38,8 +38,31 @@ export function topology(): Topology {
 
 export function validateTopology() {
   const live = liveSnapshot();
-  const roles = Object.fromEntries(Object.entries(live).filter(([, l]) => l.status === 'up').map(([id, l]) => [id, l.role]));
+  const stale = new Set(stalePrimaries().map((n) => n.id));
+  const roles = Object.fromEntries(
+    Object.entries(live)
+      .filter(([, l]) => l.status === 'up')
+      .map(([id, l]) => [id, stale.has(id) ? 'stale-primary' : l.role]),
+  );
   const v = validate(topology(), getSettings(), getNodeSsh, getClusterSecrets(), roles);
+  const truth = truthPrimary();
+  for (const n of stalePrimaries()) {
+    v.ok = false;
+    v.issues.push({
+      level: 'error',
+      nodeId: n.id,
+      code: 'stale-primary',
+      message: `${n.name} is running as a primary but ${truth?.name ?? 'another node'} is the current primary (old primary after a failover: two primaries). Select ${n.name} and press "Rejoin as replica" or "Rebuild".`,
+    });
+  }
+  for (const n of notReplicating()) {
+    v.issues.push({
+      level: 'warning',
+      nodeId: n.id,
+      code: 'not-replicating',
+      message: `${n.name} is a replica but does not stream from ${truth?.name ?? 'the primary'}. Select it and press "Rejoin as replica" or "Rebuild".`,
+    });
+  }
   // Pgpool-II keeps a backend detached even when it comes back (e.g. the primary started later than
   // Pgpool-II after a server restart): flag backends that are "down" in Pgpool-II but running
   // One warning per PostgreSQL node (with the watchdog every Pgpool-II node reports the same backend)
@@ -820,3 +843,203 @@ export function reattachBackends(poolId: string): Deployment {
     }
   });
 }
+
+// ------------------------------------------------------------------ failover follow-up / old primaries
+
+/**
+ * The primary that serves the cluster: the one Pgpool-II uses (it decides where writes go), or the only
+ * running primary when there is no Pgpool-II.
+ */
+export function truthPrimary(): ClusterNode | undefined {
+  const live = liveSnapshot();
+  const nodes = listNodes();
+  const pgs = nodes.filter((n) => n.type === 'postgres');
+  for (const pool of nodes.filter((n) => n.type === 'pgpool' && live[n.id]?.status === 'up')) {
+    const row = (live[pool.id]?.tables?.poolNodes ?? []).find((r) => r.role === 'primary' && r.status === 'up');
+    if (!row) continue;
+    const node = pgs.find((n) => (n.address === row.hostname || n.ssh.host === row.hostname) && String(pgPort(n)) === String(row.port));
+    if (node && live[node.id]?.status === 'up' && live[node.id]?.role === 'primary') return node;
+  }
+  const primaries = pgs.filter((n) => live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
+  return primaries.length === 1 ? primaries[0] : undefined;
+}
+
+/** PostgreSQL nodes running as primary that are not the serving primary (old primaries: split brain). */
+export function stalePrimaries(): ClusterNode[] {
+  const truth = truthPrimary();
+  if (!truth) return [];
+  const live = liveSnapshot();
+  return listNodes().filter((n) => n.type === 'postgres' && n.id !== truth.id && live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
+}
+
+/** Running replicas without a streaming WAL receiver while the serving primary is up. */
+export function notReplicating(): ClusterNode[] {
+  const truth = truthPrimary();
+  if (!truth) return [];
+  const live = liveSnapshot();
+  return listNodes().filter((n) => {
+    const l = live[n.id];
+    if (n.type !== 'postgres' || l?.status !== 'up' || l.role !== 'replica') return false;
+    const wr = l.tables?.walReceiver ?? [];
+    return !wr.some((r) => r.status === 'streaming');
+  });
+}
+
+let lastFollowed = '';
+/**
+ * After a failover the drawing must follow the live roles: when the serving primary is not the topology's
+ * primary, redraw the replication links to it and rewrite the configuration files of the PostgreSQL nodes
+ * that can be reached (an old primary that is down gets NODE_ROLE=replica for its next start).
+ */
+async function followFailover(): Promise<void> {
+  if (running) return;
+  const truth = truthPrimary();
+  const t = topology();
+  const drawn = t.nodes.find((n) => n.type === 'postgres' && computeRoles(t)[n.id] === 'primary');
+  if (!truth || !drawn || truth.id === drawn.id || !truth.deployedAt) return;
+  if (lastFollowed === `${drawn.id}>${truth.id}`) return;
+  lastFollowed = `${drawn.id}>${truth.id}`;
+  adoptPrimary(truth.id);
+  broadcast({ type: 'topology' });
+  emitEvent('warn', `Failover detected: ${truth.name} is the primary, ${drawn.name} is now drawn as its replica. Topology updated.`, truth.id);
+  const quiet = { line: () => undefined } as unknown as Logger;
+  for (const n of listNodes().filter((x) => x.type === 'postgres' && x.deployedAt)) {
+    await writeNodeFiles(n, quiet).catch(() => undefined);
+  }
+}
+onSnapshot(followFailover);
+
+/**
+ * Turn a PostgreSQL node into a replica of the serving primary: "rewind" (pg_rewind, falls back to a
+ * fresh copy) or "clone" (fresh copy with pg_basebackup). For an old primary after a failover, or a
+ * replica that stopped streaming. Pgpool-II is paused meanwhile and the node is attached again after.
+ */
+export function rejoinNode(nodeId: string, mode: 'rewind' | 'clone'): Deployment {
+  const node = getNode(nodeId);
+  if (!node || node.type !== 'postgres') throw fail('Choose a PostgreSQL node');
+  const primary = truthPrimary();
+  if (!primary) throw fail('There is no single running primary to rejoin');
+  if (primary.id === node.id) throw fail(`${node.name} is the current primary`);
+  if (!node.deployedAt) throw fail(`${node.name} is not deployed`);
+  const what = mode === 'clone' ? 'rebuild' : 'rejoin';
+  return startJob(what, `${node.name} → replica of ${primary.name}`, async (log) => {
+    emitEvent('info', `${node.name}: ${what} as a replica of ${primary.name} started`, node.id);
+    await withPgpoolPaused(log, async () => {
+      await onNode(node, async (s, rt) => {
+        log.line(`${node.name}: stopping`, 'cmd');
+        await s.exec(`${rt} stop -t 60 ${CONTAINER_NAME.postgres}`, { sudo: true });
+        const image = (await s.exec(`${rt} inspect -f '{{.Config.Image}}' ${CONTAINER_NAME.postgres}`, { sudo: true })).stdout.trim();
+        if (!image) throw new Error(`${node.name}: container ${CONTAINER_NAME.postgres} not found; deploy the node instead`);
+        log.line(`${node.name}: pgcloud_rewind ${primary.address} ${pgPort(primary)}${mode === 'clone' ? ' --clone (fresh copy)' : ''}`, 'cmd');
+        await s.run(
+          `${rt} run --rm --network host --volumes-from ${CONTAINER_NAME.postgres} --entrypoint pgcloud_rewind ${q(image)} ${primary.address} ${pgPort(primary)}${mode === 'clone' ? ' --clone' : ''}`,
+          { sudo: true, onData: log.stream() },
+        );
+        await s.run(`${rt} start ${CONTAINER_NAME.postgres}`, { sudo: true });
+        await waitHealthy(s, rt, node, log, 180);
+      });
+      for (let i = 0; i < 30; i++) {
+        if ((await pgQuery(node, 'SELECT status FROM pg_stat_wal_receiver').catch(() => '')) === 'streaming') break;
+        await sleep(1000);
+      }
+      if ((await pgQuery(node, 'SELECT status FROM pg_stat_wal_receiver').catch(() => '')) !== 'streaming')
+        throw new Error(`${node.name} started but does not stream from ${primary.name}`);
+      log.line(`${node.name} is streaming from ${primary.name}`, 'ok');
+      adoptPrimary(primary.id);
+      broadcast({ type: 'topology' });
+      await writeNodeFiles(node, log);
+    });
+    // Pgpool-II may keep the node detached: attach it again (once is enough with the watchdog)
+    await sleep(8000);
+    for (const d of detachedBackends().filter((x) => x.node.id === node.id).slice(0, 1)) {
+      await onNode(d.pool, async (s, rt) => {
+        log.line(`${d.pool.name}: pcp_attach_node ${d.backendId} (${node.name})`, 'cmd');
+        await s.run(`${rt} exec ${CONTAINER_NAME.pgpool} ./tools/attach.sh ${d.backendId}`, { sudo: true, onData: log.stream() });
+      });
+    }
+    emitEvent('success', `${node.name} is a replica of ${primary.name}`, node.id);
+  });
+}
+
+// ------------------------------------------------------------------ full rebuild / auto-heal
+
+/**
+ * Destroy everything and deploy again from the drawing: every container, PostgreSQL data volume and
+ * configuration directory of every node is deleted, then the cluster is deployed from scratch. For a
+ * cluster that cannot be repaired (or a clean restart of a test environment). ALL DATA IS LOST.
+ */
+export function rebuildCluster(): Deployment {
+  const v = validateTopology();
+  // Live-state problems are exactly what a rebuild fixes: only the drawing itself must be valid
+  const blocking = v.issues.filter((i) => i.level === 'error' && !['roles', 'stale-primary'].includes(i.code ?? ''));
+  if (blocking.length) throw fail(blocking.map((i) => i.message).join('\n'));
+  const nodes = listNodes();
+  const order: Array<ClusterNode['type']> = ['pgbouncer', 'pgpool', 'postgres'];
+  return startJob('rebuild', 'cluster', async (log) => {
+    emitEvent('warn', 'Cluster rebuild started: destroying every node and its data');
+    for (const type of order) {
+      for (const n of nodes.filter((x) => x.type === type)) {
+        try {
+          await containerAction(n, 'destroy', log);
+        } catch (e) {
+          log.line(`${n.name}: could not destroy (${(e as Error).message}); it will be overwritten by the deploy`, 'warn');
+        }
+        kv.set(`cfg:${n.id}`, '');
+      }
+    }
+    lastFollowed = '';
+    const plan = validateTopology().plan;
+    log.line(`Deploying ${plan.length} nodes from scratch: ${plan.map((p) => `${p.name}(${p.role})`).join(' → ')}`);
+    for (const step of plan) {
+      const node = getNode(step.nodeId);
+      if (node) await deployNode(node, log);
+    }
+    await syncReplication(log).catch((e) => log.line(`Could not set synchronous replication: ${(e as Error).message}`, 'warn'));
+    emitEvent('success', 'Cluster rebuilt from scratch');
+  });
+}
+
+const healedAt = new Map<string, number>();
+const HEAL_COOLDOWN_MS = 120_000;
+const canHeal = (key: string) => Date.now() - (healedAt.get(key) ?? 0) > HEAL_COOLDOWN_MS;
+
+/**
+ * Auto-heal after an outage (Settings → Auto-heal), one safe action per monitoring round:
+ *  - an old primary running next to the serving primary is rejoined as a replica (only with
+ *    "Old primary that comes back: rejoin automatically");
+ *  - a running node that Pgpool-II keeps detached is attached again when it is safe: the primary when
+ *    Pgpool-II has no attached primary, or a replica that streams.
+ */
+async function autoHeal(): Promise<void> {
+  const settings = getSettings();
+  if (running || settings.autoHeal === false) return;
+  const live = liveSnapshot();
+
+  if (settings.oldPrimary !== 'wait') {
+    const stale = stalePrimaries().find((n) => canHeal(`rejoin:${n.id}`));
+    if (stale) {
+      healedAt.set(`rejoin:${stale.id}`, Date.now());
+      emitEvent('warn', `Auto-heal: ${stale.name} is an old primary running next to the current one; rejoining it as a replica`, stale.id);
+      rejoinNode(stale.id, 'rewind');
+      return;
+    }
+  }
+
+  for (const d of detachedBackends()) {
+    if (!canHeal(`attach:${d.node.id}`)) continue;
+    const rows = live[d.pool.id]?.tables?.poolNodes ?? [];
+    const poolHasPrimary = rows.some((r) => r.role === 'primary' && r.status === 'up');
+    const streaming = (live[d.node.id]?.tables?.walReceiver ?? []).some((r) => r.status === 'streaming');
+    const safe = d.isPrimary ? !poolHasPrimary && stalePrimaries().length === 0 : streaming;
+    if (!safe) continue;
+    healedAt.set(`attach:${d.node.id}`, Date.now());
+    emitEvent('warn', `Auto-heal: ${d.node.name} is running but detached in Pgpool-II; attaching it again`, d.pool.id);
+    try {
+      reattachBackends(d.pool.id);
+    } catch {
+      /* nothing to do any more */
+    }
+    return;
+  }
+}
+onSnapshot(autoHeal);

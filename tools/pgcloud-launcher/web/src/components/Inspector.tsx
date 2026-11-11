@@ -53,7 +53,8 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
   const [tab, setTab] = useState<Tab>('config');
   const nodeLive = live[node.id];
   const busy = !!current;
-  const [confirm, setConfirm] = useState<null | 'destroy' | 'remove' | 'delete' | 'switchover' | 'leader'>(null);
+  const [confirm, setConfirm] = useState<null | 'destroy' | 'remove' | 'delete' | 'switchover' | 'leader' | 'rejoin' | 'rebuild'>(null);
+  const rejoinIssue = issues.find((i) => i.code === 'stale-primary' || i.code === 'not-replicating');
 
   // PostgreSQL switchover: offered on a running replica while exactly one primary runs
   const livePrimary = nodes.filter((n) => n.type === 'postgres' && live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
@@ -80,9 +81,9 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
   }, [watchdogOn, node.id, current]);
   const isLeader = !!watchdog && watchdog.leader === node.address;
 
-  const run = async (path: string, what: string) => {
+  const run = async (path: string, what: string, body: unknown = {}) => {
     try {
-      await post(path);
+      await post(path, body);
       toast(`${what} started — follow it in the Deploy tab`, 'info');
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -143,7 +144,23 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
         {node.type === 'postgres' && node.deployedAt && (
           <div className="ha-box">
             <div className="ha-title">High availability</div>
-            {canSwitchover ? (
+            {rejoinIssue ? (
+              <>
+                <p className={rejoinIssue.code === 'stale-primary' ? 'err' : 'faint'}>
+                  {rejoinIssue.code === 'stale-primary'
+                    ? 'Old primary: it runs as a primary next to the current one. Make it a replica again:'
+                    : 'This replica does not stream from the primary. Make it follow the primary again:'}
+                </p>
+                <div className="btn-row">
+                  <button className="btn primary" disabled={busy} onClick={() => setConfirm('rejoin')}>
+                    <SwitchIcon /> Rejoin as replica
+                  </button>
+                  <button className="btn" disabled={busy} onClick={() => setConfirm('rebuild')}>
+                    <RestartIcon /> Rebuild (fresh copy)
+                  </button>
+                </div>
+              </>
+            ) : canSwitchover ? (
               <>
                 <p className="faint">
                   Planned switchover: <b>{node.name}</b> becomes the primary and <b>{livePrimary[0].name}</b> one of its replicas. No committed
@@ -230,6 +247,31 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
           }
           confirmText="Switch over"
           onConfirm={() => run(`/api/nodes/${node.id}/switchover`, `Switchover to ${node.name}`)}
+          onClose={() => setConfirm(null)}
+        />
+      )}
+      {(confirm === 'rejoin' || confirm === 'rebuild') && (
+        <Confirm
+          title={confirm === 'rejoin' ? 'Rejoin as replica' : 'Rebuild from the primary'}
+          message={
+            confirm === 'rejoin' ? (
+              <>
+                <b>{node.name}</b> is stopped, synchronised with the current primary using <b>pg_rewind</b> (only the changed blocks; a
+                full copy if that fails) and started as its replica. Writes made on {node.name} after the failover are discarded.
+                Pgpool-II pauses for the duration.
+              </>
+            ) : (
+              <>
+                The data of <b>{node.name}</b> is <b>deleted</b> and copied again from the current primary (pg_basebackup), then it
+                starts as a replica. Slower than a rejoin, but it always works. Pgpool-II pauses for the duration.
+              </>
+            )
+          }
+          confirmText={confirm === 'rejoin' ? 'Rejoin' : 'Rebuild'}
+          danger={confirm === 'rebuild'}
+          onConfirm={() =>
+            run(`/api/nodes/${node.id}/rejoin`, `${confirm === 'rejoin' ? 'Rejoin' : 'Rebuild'} ${node.name}`, { mode: confirm === 'rejoin' ? 'rewind' : 'clone' })
+          }
           onClose={() => setConfirm(null)}
         />
       )}

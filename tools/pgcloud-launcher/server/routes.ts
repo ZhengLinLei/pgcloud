@@ -39,6 +39,8 @@ import {
   deployAll,
   makeWatchdogLeader,
   reattachBackends,
+  rejoinNode,
+  rebuildCluster,
   runNodeAction,
   switchover,
   watchdogInfo,
@@ -160,6 +162,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     /** Re-attach the running backends that this Pgpool-II node keeps detached. */
     api.post<{ Params: { id: string } }>('/api/nodes/:id/reattach', async (req) => reattachBackends(req.params.id));
 
+    /** Make a PostgreSQL node a replica of the serving primary again: body { mode: 'rewind' | 'clone' }. */
+    api.post<{ Params: { id: string }; Body: { mode?: string } }>('/api/nodes/:id/rejoin', async (req) =>
+      rejoinNode(req.params.id, req.body?.mode === 'clone' ? 'clone' : 'rewind'),
+    );
+
     api.post<{ Params: { id: string; action: NodeAction } }>('/api/nodes/:id/actions/:action', async (req) => {
       const allowed: NodeAction[] = ['deploy', 'start', 'stop', 'restart', 'remove', 'destroy'];
       if (!allowed.includes(req.params.action)) throw badRequest('Unknown action');
@@ -258,6 +265,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
     // ---------------------------------------------- deployments
     api.post('/api/deploy', async () => deployAll());
+    /** Destroy every node and its data, then deploy the cluster from scratch. Body: { confirm: "DESTROY" }. */
+    api.post<{ Body: { confirm?: string } }>('/api/rebuild-cluster', async (req) => {
+      if (req.body?.confirm !== 'DESTROY') throw badRequest('Confirm with { "confirm": "DESTROY" }: every node and its data are deleted');
+      return rebuildCluster();
+    });
     api.get('/api/deployments', async () => ({ deployments: listDeployments(), current: currentDeployment() }));
     api.get<{ Params: { id: string } }>('/api/deployments/:id/log', async (req) => ({ log: getDeploymentLog(req.params.id) }));
     api.get('/api/events', async () => listEvents());

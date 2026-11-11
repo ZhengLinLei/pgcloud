@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# Syntax: rewind.sh <new_primary_ip> <new_primary_port>
+# Syntax: rewind.sh <new_primary_ip> <new_primary_port> [--clone]
+#   --clone  skip pg_rewind and copy the data again from the new primary (pg_basebackup)
 #
 # Turns a former primary into a replica of the new primary. PostgreSQL must be STOPPED on this
 # data directory. It is used in two ways:
@@ -18,9 +19,11 @@
 set -o pipefail
 
 if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "Usage $0 <new_primary_ip> <new_primary_port>"
+    echo "Usage $0 <new_primary_ip> <new_primary_port> [--clone]"
     exit 1
 fi
+CLONE=false
+[ "$3" = "--clone" ] && CLONE=true
 
 # Runs as root in case 1 (the mounted .env is root-only); everything touching PGDATA runs as postgres
 as_pg() {
@@ -59,11 +62,14 @@ fi
 export PGPASSWORD="$POSTGRES_PASSWORD"
 SOURCE="host=$1 port=$2 user=$POSTGRES_USER dbname=$POSTGRES_DB connect_timeout=10"
 
-echo "Running pg_rewind against $1:$2 ..."
-if as_pg env PGPASSWORD="$PGPASSWORD" pg_rewind --target-pgdata="$PGDATA" --source-server="$SOURCE" --progress 2>&1; then
+if ! $CLONE; then
+    echo "Running pg_rewind against $1:$2 ..."
+fi
+if ! $CLONE && as_pg env PGPASSWORD="$PGPASSWORD" pg_rewind --target-pgdata="$PGDATA" --source-server="$SOURCE" --progress 2>&1; then
     echo "pg_rewind ... ok"
 else
-    echo "pg_rewind ... fail: cloning the node again from $1:$2 with pg_basebackup"
+    $CLONE && echo "Fresh copy requested: cloning the node again from $1:$2 with pg_basebackup" \
+           || echo "pg_rewind ... fail: cloning the node again from $1:$2 with pg_basebackup"
     as_pg sh -c "find '$PGDATA' -mindepth 1 -delete" || { echo "Cannot empty $PGDATA ... fail"; exit 3; }
     as_pg env PGPASSWORD="$REPLICA_PASS" pg_basebackup -h "$1" -p "$2" -U "$REPLICA_USER" -D "$PGDATA" -X stream -w \
         -d "host=$1 port=$2 user=$REPLICA_USER application_name=$BACKEND_NAME" 2>&1 || {

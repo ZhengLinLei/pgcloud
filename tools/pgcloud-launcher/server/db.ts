@@ -92,6 +92,8 @@ interface SettingsStored {
   runtime: SettingsView['runtime'];
   remoteDir: string;
   monitorIntervalSec: number;
+  oldPrimary: SettingsView['oldPrimary'];
+  autoHeal: boolean;
 }
 
 function defaultSettings(): SettingsStored {
@@ -117,6 +119,8 @@ function defaultSettings(): SettingsStored {
     runtime: 'auto',
     remoteDir: '~/pgcloud',
     monitorIntervalSec: 3,
+    oldPrimary: 'rejoin',
+    autoHeal: true,
   };
 }
 
@@ -185,6 +189,8 @@ export function updateSettings(input: SettingsInput): SettingsView {
   if (typeof input.monitorIntervalSec === 'number') {
     s.monitorIntervalSec = Math.min(60, Math.max(1, Math.round(input.monitorIntervalSec)));
   }
+  if (input.oldPrimary === 'rejoin' || input.oldPrimary === 'wait') s.oldPrimary = input.oldPrimary;
+  if (typeof input.autoHeal === 'boolean') s.autoHeal = input.autoHeal;
   kvSet('settings', s);
   return getSettings();
 }

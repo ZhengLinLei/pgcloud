@@ -243,6 +243,19 @@ async function runTick(): Promise<void> {
   const results = await Promise.all(nodes.map((n) => checkNode(n, withContainer).catch(() => null)));
   results.forEach((r, i) => r && live.set(nodes[i].id, r));
   broadcast({ type: 'live', nodes: liveSnapshot() });
+  for (const fn of snapshotListeners) {
+    try {
+      await fn();
+    } catch {
+      /* a listener must never stop the monitor */
+    }
+  }
+}
+
+const snapshotListeners: Array<() => void | Promise<void>> = [];
+/** Run `fn` after every monitoring round (used to follow failovers in the topology). */
+export function onSnapshot(fn: () => void | Promise<void>): void {
+  snapshotListeners.push(fn);
 }
 
 export function startMonitor(): void {

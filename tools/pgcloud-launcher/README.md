@@ -108,6 +108,8 @@ Both are one click in the node inspector (Topology → select the node → *High
 
 Writes are not accepted while it runs (about a minute in the test servers: 3 PostgreSQL, 3 Pgpool-II, 1 PgBouncer); clients waiting in PgBouncer continue afterwards, other clients must reconnect. In the tests, a client writing through PgBouncer during the switchover committed 392 rows and all of them were on the new primary. Redeploying Pgpool-II also starts a new watchdog election, so check the watchdog leader afterwards if it matters.
 
+**After an automatic failover** the drawing follows by itself: when Pgpool-II serves a new primary, the replication links are redrawn to it. If the old primary comes back on its own (its server was down during the failover, so Pgpool-II could not turn it into a replica), it checks the other nodes at start and, depending on *Settings → Old primary that comes back*, rejoins as a replica (`pg_rewind`, or a fresh copy if that fails) or waits without starting. The launcher marks any node that runs as a second primary, or a replica that does not stream, and its inspector offers **Rejoin as replica** (pg_rewind) and **Rebuild (fresh copy)** (pg_basebackup).
+
 **Make watchdog leader** (on a Pgpool-II node, when two or more are deployed): the inspector shows whether the node is the watchdog LEADER or STANDBY. The button restarts the current leader so that the others elect a new one, until the chosen node leads. Clients connected to the restarted node reconnect after a few seconds. Use three or more Pgpool-II nodes: with two, the one left alone has no quorum.
 
 ## Security

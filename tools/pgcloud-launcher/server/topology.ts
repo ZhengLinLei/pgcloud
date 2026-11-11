@@ -295,6 +295,12 @@ export function generateFiles(node: ClusterNode, ctx: GenContext): GeneratedFile
           PRIMARY_HOST: role === 'replica' && primary ? primary.address : '127.0.0.1',
           PRIMARY_PORT: role === 'replica' && primary ? (primary.config as unknown as PostgresConfig).port : c.port,
           PROMOTE_MIN_DELAY: c.promoteMinDelay,
+          // The other PostgreSQL nodes: at start an old primary checks them for a newer primary
+          PEER_HOSTS: t.nodes
+            .filter((n) => n.type === 'postgres' && n.id !== node.id)
+            .map((n) => `${n.address}:${(n.config as unknown as PostgresConfig).port}`)
+            .join(','),
+          STALE_PRIMARY: settings.oldPrimary ?? 'rejoin',
         }),
       },
     };
