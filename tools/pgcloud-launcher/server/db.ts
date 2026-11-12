@@ -370,6 +370,12 @@ export function addEvent(level: ClusterEvent['level'], message: string, nodeId: 
     .get(info.lastInsertRowid) as unknown as ClusterEvent;
 }
 
+export function listEventsBetween(from: string, to: string): ClusterEvent[] {
+  return db
+    .prepare('SELECT id, ts, node_id AS nodeId, level, message FROM events WHERE ts >= ? AND ts <= ? ORDER BY id')
+    .all(from, to) as unknown as ClusterEvent[];
+}
+
 export function listEvents(limit = 300): ClusterEvent[] {
   return db
     .prepare('SELECT id, ts, node_id AS nodeId, level, message FROM events ORDER BY id DESC LIMIT ?')

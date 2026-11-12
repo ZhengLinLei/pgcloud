@@ -2,7 +2,13 @@ import { memo } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from '@xyflow/react';
 import type { NodeStatus } from '../../../shared/types';
 
-export type StatusEdgeData = { status: NodeStatus; label: string; kind: 'replication' | 'balance' | 'pool' };
+export type StatusEdgeData = {
+  status: NodeStatus;
+  label: string;
+  kind: 'replication' | 'balance' | 'pool';
+  onSelect?: (id: string) => void;
+  onRemove?: (id: string) => void;
+};
 export type StatusFlowEdge = Edge<StatusEdgeData, 'status'>;
 
 const COLORS: Record<NodeStatus, string> = {
@@ -24,6 +30,7 @@ function StatusEdgeView(props: EdgeProps<StatusFlowEdge>) {
       <BaseEdge
         id={id}
         path={path}
+        interactionWidth={24}
         style={{
           stroke: selected ? 'var(--text)' : color,
           strokeWidth: selected ? 2 : 1.5,
@@ -40,10 +47,31 @@ function StatusEdgeView(props: EdgeProps<StatusFlowEdge>) {
       {data?.label && (
         <EdgeLabelRenderer>
           <div
-            className="edge-label nodrag nopan"
+            className={`edge-label nodrag nopan ${selected ? 'selected' : ''}`}
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, color: alive ? kindColor : color }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onSelect?.(id);
+            }}
+            title="Click to select · ⌫ or ✕ to remove"
           >
             {data.label}
+            {selected && (
+              <button
+                className="edge-remove"
+                // pointerdown, not click: React Flow clears the selection on mousedown, which would
+                // unmount this button before its click arrives
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  data.onRemove?.(id);
+                }}
+                aria-label="Remove link"
+              >
+                ✕ remove
+              </button>
+            )}
           </div>
         </EdgeLabelRenderer>
       )}

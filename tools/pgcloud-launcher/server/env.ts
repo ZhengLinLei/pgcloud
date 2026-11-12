@@ -19,7 +19,9 @@ export const paths = {
   db: path.join(env.dataDir, 'launcher.db'),
   keyFile: path.join(env.dataDir, 'secret.key'),
   images: path.join(env.dataDir, 'images'),
+  recordings: path.join(env.dataDir, 'recordings'),
 };
 
 fs.mkdirSync(env.dataDir, { recursive: true });
 fs.mkdirSync(paths.images, { recursive: true });
+fs.mkdirSync(paths.recordings, { recursive: true });

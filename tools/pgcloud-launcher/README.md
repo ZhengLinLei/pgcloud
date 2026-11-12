@@ -23,18 +23,18 @@ A web application to **design, deploy and monitor** PgCloud clusters visually.
 From the repository root (the PgCloud sources are bundled in the image):
 
 ```bash
-docker build -t pgcloud/launcher:1.1.0 -f tools/pgcloud-launcher/Dockerfile .
+docker build -t pgcloud/launcher:1.2.0 -f tools/pgcloud-launcher/Dockerfile .
 docker run -d --name pgcloud-launcher \
   -p 8080:8080 \
   -v pgcloud-launcher:/data \
-  pgcloud/launcher:1.1.0
+  pgcloud/launcher:1.2.0
 docker logs pgcloud-launcher     # prints the generated admin password
 ```
 
 Or use the published image (built by [`.github/workflows/release-images.yml`](../../.github/workflows/release-images.yml) on every GitHub release):
 
 ```bash
-docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.1.0
+docker run -d --name pgcloud-launcher -p 8080:8080 -v pgcloud-launcher:/data zhenglinlei/pgcloud-launcher:1.2.0
 ```
 
 Open <http://localhost:8080>. The admin password is also saved in `/data/admin-password.txt`. You can change it in **Settings**, or fix it with `-e LAUNCHER_ADMIN_PASSWORD=...`.
@@ -92,7 +92,7 @@ After a failover the new primary runs with **asynchronous** replication (otherwi
 
 Planned work never triggers a failover: while the launcher redeploys or restarts PostgreSQL nodes it pauses the Pgpool-II containers and resumes them afterwards.
 
-The complete manual, the illustrated tutorial and the test/benchmark report are in the book: [`docs/wiki/PgCloud_The_Master_Book_v1.1.0.pdf`](../../docs/wiki/PgCloud_The_Master_Book_v1.1.0.pdf).
+The complete manual, the illustrated tutorial and the test/benchmark report are in the book: [`docs/wiki/PgCloud_The_Master_Book.pdf`](../../docs/wiki/PgCloud_The_Master_Book.pdf).
 
 ## Manual switchover and watchdog leader
 
@@ -111,6 +111,45 @@ Writes are not accepted while it runs (about a minute in the test servers: 3 Pos
 **After an automatic failover** the drawing follows by itself: when Pgpool-II serves a new primary, the replication links are redrawn to it. If the old primary comes back on its own (its server was down during the failover, so Pgpool-II could not turn it into a replica), it checks the other nodes at start and, depending on *Settings → Old primary that comes back*, rejoins as a replica (`pg_rewind`, or a fresh copy if that fails) or waits without starting. The launcher marks any node that runs as a second primary, or a replica that does not stream, and its inspector offers **Rejoin as replica** (pg_rewind) and **Rebuild (fresh copy)** (pg_basebackup).
 
 **Make watchdog leader** (on a Pgpool-II node, when two or more are deployed): the inspector shows whether the node is the watchdog LEADER or STANDBY. The button restarts the current leader so that the others elect a new one, until the chosen node leads. Clients connected to the restarted node reconnect after a few seconds. Use three or more Pgpool-II nodes: with two, the one left alone has no quorum.
+
+## Backup nodes
+
+A **backup** node (palette → *Backup*, or the *Backup node* checkbox of a PostgreSQL node) is a PostgreSQL replica that serves no traffic: it streams from the primary, but no Pgpool-II or PgBouncer may connect to it (the validation blocks such links) and Pgpool-II does not balance reads to it. It waits until it is needed. Its inspector sets what it does in an outage:
+
+| Option | What happens |
+|---|---|
+| **Keep the number of replicas** | A PostgreSQL node (a replica, or the old primary after a failover) stays down longer than the grace time → the backup serves as a replica in its place: it takes over the Pgpool-II / PgBouncer links of the failed node, and Pgpool-II is redeployed with it. |
+| **Last resort** | Every normal PostgreSQL node is down → the backup is promoted to primary, the topology and Pgpool-II follow it. |
+| **Return to backup when the cluster recovers** (on by default) | Once the node it replaced runs again and stays healthy for the grace time, the backup hands the work back: its links return to that node, Pgpool-II is redeployed, and it is an idle backup again. If it serves as the primary, it first hands the role to a recovered replica with a planned switchover (nothing is lost). **Off**: the first time it acts, it becomes a normal (system) node for good; the node it replaced becomes the backup, and a notice says *previously a backup node, promoted to a system node* (dismiss it in its inspector). |
+| **Priority** | With several backups, the highest priority that can act is used first. |
+| **Act after (s)** | Grace time a node must stay down before the backup acts, and stay healthy before the backup hands the work back (default 60 s). |
+
+While it stands in for a node, a backup is shown **in service** (solid amber border, with the role it serves as) and may have Pgpool-II / PgBouncer links; an idle backup may not. A backup is never made primary by hand (no *Make primary* / *Promote*): it only becomes primary by itself as a last resort. To use it as a normal node, uncheck *Backup node*. A backup found running as the primary (for example promoted by Pgpool-II) is treated as in service and hands the role back the same way.
+
+## Fast-swap
+
+When the cluster is about to lose its data — only one PostgreSQL node with data is still running, or the primary has no replica or backup streaming from it — a red **CLUSTER AT RISK** banner appears on every tab with a **Fast-swap** button. Enter the SSH access of a new server: the launcher picks the node with the freshest data (the primary Pgpool-II serves, or the highest timeline / WAL position) and copies it with **pg_basebackup over streaming replication**. That is faster and safer than copying files (`scp` of a running data directory is inconsistent): the source keeps running, only the database travels, and the new node keeps streaming afterwards, so nothing written during the copy is lost. The node is created as a top-priority backup (priority 1000, grace 30 s), so the backup logic uses it right away. Fast-swap nodes may stream from a replica when no primary is left.
+
+## Audit recordings
+
+The **REC** button in the top bar starts a recording (a small popover asks for an optional name; empty keeps the date); press it again to stop. The launcher then collects everything that happened in that window, with date and time, into one timeline: its events, every operation with its console, the container logs of every node (`docker logs --timestamps`) and the Pgpool-II failover / failback logs. The **Audit** tab lists the recordings, renames them (**Rename** next to the name, or `PATCH /api/recordings/<id>` with `{"name": …}`), filters them (text, level, node, source) and downloads them as `.log` (one line per entry, UTC) or `.json`. Recordings are kept in `DATA_DIR/recordings`.
+
+## "System not accessible" alert
+
+When no entry point accepts connections for more than 6 seconds — the PgBouncer nodes, or the Pgpool-II nodes if there is no PgBouncer, or the primary if there is neither — a red card appears in the bottom-right corner of every tab. It says how long the system has been unreachable, why (checked layer by layer: PostgreSQL, Pgpool-II, PgBouncer) and what can be done, each with an **Apply** button when the launcher can do it:
+
+| Situation | Offered |
+|---|---|
+| No PostgreSQL node deployed (topology replaced) | Deploy the cluster |
+| No PostgreSQL node running | Start each node; restore from a backup |
+| Replicas running but no primary | **Promote** the node with the freshest data (highest timeline / WAL); a last-resort backup that is about to take over is shown as AUTO |
+| A second primary | Rejoin it as a replica |
+| Pgpool-II unreachable or refusing connections | Re-attach detached nodes; redeploy every Pgpool-II node together |
+| PgBouncer down | Restart it |
+| Last copy of the data at risk | Fast-swap |
+| Always | Check the network / firewall / disk / Docker daemon; Destroy & rebuild (last resort) |
+
+While an operation runs (a deploy, a switchover…) the card says so: the entry point may simply be paused. The card can be minimised; the toasts move to the bottom-left while it is shown. `GET /api/access` returns the same diagnosis, and `POST /api/nodes/<id>/promote` promotes a replica when no primary is left.
 
 ## Outages and recovery
 
@@ -160,6 +199,7 @@ A release tagged `v1.2.3` produces the tags `1.2.3`, `1.2` and `latest` (`latest
 
 - the API and the live feed are simulated in the browser from [`web/src/demo/snapshot.json`](web/src/demo/snapshot.json), a snapshot recorded from the playground cluster (secrets replaced by `********`);
 - the topology can be edited in memory; deploying, node actions, SSH tests and uploads answer "Not available in the demo";
+- the Audit tab has a recording of the snapshot's deployment (its events, the deploy console and the container logs of every node), **REC** records the demo's own events, and the `.log` / `.json` downloads are generated in the browser;
 - assets use relative paths, so the folder works from any static host (GitHub Pages, `python3 -m http.server -d doc`). Browsers do not run it from `file://`.
 
 The normal build (`npm run build`) does not contain the demo code.

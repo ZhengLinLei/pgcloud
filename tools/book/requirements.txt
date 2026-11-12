@@ -1,0 +1,5 @@
+pypdf
+pdfplumber
+pypdfium2
+reportlab
+pillow

@@ -16,7 +16,12 @@ function PgNodeView({ data, selected }: NodeProps<PgFlowNode>) {
   const m = live?.metrics ?? {};
   const status = live?.status ?? 'unknown';
   // live role when reachable; the drawn role for nodes not deployed yet; nothing for a node that is down
-  const role = status === 'up' && live?.role ? live.role : status === 'down' ? undefined : data.role;
+  const cfg = node.config as { backup?: boolean; fastSwap?: boolean; backupPriority?: number; backupServing?: string; promotedFromBackup?: string };
+  const serving = !!cfg.backup && !!cfg.backupServing;
+  const liveRole = status === 'up' && live?.role ? live.role : status === 'down' ? undefined : data.role;
+  // a backup streams like a replica; show what it is for
+  // (a backup standing in for a failed node shows the role it serves as)
+  const role = cfg.backup && !serving && liveRole !== 'primary' ? (cfg.fastSwap ? 'fast-swap' : 'backup') : liveRole;
   const port = (node.config as { port?: number }).port;
 
   let metrics: Array<[string, string]>;
@@ -41,7 +46,7 @@ function PgNodeView({ data, selected }: NodeProps<PgFlowNode>) {
   }
 
   return (
-    <div className={`pg-node ${node.type} status-${status} ${selected ? 'selected' : ''}`}>
+    <div className={`pg-node ${node.type} ${cfg.backup ? (serving ? 'backup serving' : 'backup') : ''} status-${status} ${selected ? 'selected' : ''}`}>
       <Handle type="target" position={Position.Top} id="t" />
       <Handle type="target" position={Position.Left} id="l" />
       <Handle type="source" position={Position.Left} id="ls" className="handle-twin" />
@@ -54,7 +59,14 @@ function PgNodeView({ data, selected }: NodeProps<PgFlowNode>) {
             ▲{issues}
           </span>
         )}
-        <span title={TYPE_LABEL[node.type]}>{TYPE_SHORT[node.type]}</span>
+        {cfg.promotedFromBackup && (
+          <span className="warn" title="Previously a backup node, promoted to a system node">
+            ex-backup
+          </span>
+        )}
+        <span title={TYPE_LABEL[node.type]}>
+          {serving ? 'backup · in service' : cfg.backup ? `backup · p${cfg.backupPriority ?? 0}` : TYPE_SHORT[node.type]}
+        </span>
       </div>
       <div className="pg-node-head">
         <div className="pg-node-icon">

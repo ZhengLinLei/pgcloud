@@ -26,7 +26,17 @@ export function StatusBadge({ status }: { status: NodeStatus | undefined }) {
 export function RoleBadge({ role }: { role: string | undefined }) {
   if (!role) return null;
   const color =
-    role === 'primary' ? 'var(--accent)' : role === 'replica' ? 'var(--cyan)' : role === 'balancer' ? 'var(--pool)' : 'var(--bouncer)';
+    role === 'primary'
+      ? 'var(--accent)'
+      : role === 'replica'
+        ? 'var(--cyan)'
+        : role === 'backup'
+          ? 'var(--muted)'
+          : role === 'fast-swap'
+            ? 'var(--danger)'
+            : role === 'balancer'
+              ? 'var(--pool)'
+              : 'var(--bouncer)';
   return (
     <span className="badge" style={{ color }}>
       {role}

@@ -28,7 +28,7 @@
     </a>
     &emsp;    
     <a>
-        <img src="https://img.shields.io/badge/version-1.1.0-brightgreen" alt="Version" />
+        <img src="https://img.shields.io/badge/version-1.2.0-brightgreen" alt="Version" />
     </a>
 </p>
 <br>

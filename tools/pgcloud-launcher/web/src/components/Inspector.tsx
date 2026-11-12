@@ -12,6 +12,8 @@ interface FieldDef {
   kind: FieldKind;
   options?: string[];
   help?: string;
+  /** only shown for backup nodes */
+  backupOnly?: boolean;
 }
 
 const FIELDS: Record<NodeType, FieldDef[]> = {
@@ -25,6 +27,17 @@ const FIELDS: Record<NodeType, FieldDef[]> = {
     { key: 'maintenanceWorkMem', label: 'maintenance_work_mem', kind: 'text' },
     { key: 'weight', label: 'Pgpool load-balance weight', kind: 'number', help: '0 = no read traffic' },
     { key: 'promoteMinDelay', label: 'Max replay delay to promote (s)', kind: 'number', help: '0 = always promote' },
+    { key: 'backup', label: 'Backup node (streams from the primary, serves no traffic)', kind: 'bool' },
+    { key: 'backupReplace', label: 'Keep the number of replicas: replace a node that is down', kind: 'bool', backupOnly: true },
+    { key: 'backupLastResort', label: 'Last resort: become the primary if every other node is down', kind: 'bool', backupOnly: true },
+    { key: 'backupPriority', label: 'Backup priority', kind: 'number', help: 'higher acts first', backupOnly: true },
+    { key: 'backupGraceSec', label: 'Act after a node is down for (s)', kind: 'number', backupOnly: true },
+    {
+      key: 'backupReturn',
+      label: 'Return to backup when the cluster recovers (off: it becomes a system node the first time it acts)',
+      kind: 'bool',
+      backupOnly: true,
+    },
   ],
   pgpool: [
     { key: 'port', label: 'Port', kind: 'number' },
@@ -55,6 +68,10 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
   const busy = !!current;
   const [confirm, setConfirm] = useState<null | 'destroy' | 'remove' | 'delete' | 'switchover' | 'leader' | 'rejoin' | 'rebuild'>(null);
   const rejoinIssue = issues.find((i) => i.code === 'stale-primary' || i.code === 'not-replicating');
+  const pgCfg = node.config as { backup?: boolean; backupServing?: string; backupFor?: string; promotedFromBackup?: string };
+  const servingFor = pgCfg.backupFor ? nodes.find((n) => n.id === pgCfg.backupFor)?.name : undefined;
+  const dismissPromoted = () =>
+    patch(`/api/nodes/${node.id}`, { config: { promotedFromBackup: null } }).catch((e) => toast((e as Error).message, 'error'));
 
   // PostgreSQL switchover: offered on a running replica while exactly one primary runs
   const livePrimary = nodes.filter((n) => n.type === 'postgres' && live[n.id]?.status === 'up' && live[n.id]?.role === 'primary');
@@ -129,6 +146,11 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
         {issues.map((i, k) => (
           <div key={k} className={`issue ${i.level}`}>
             {i.level === 'error' ? '✖' : '▲'} <span>{i.message}</span>
+            {i.code === 'backup-promoted' && (
+              <button className="btn sm ghost" style={{ marginLeft: 'auto' }} onClick={dismissPromoted}>
+                Dismiss
+              </button>
+            )}
           </div>
         ))}
 
@@ -160,6 +182,13 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
                   </button>
                 </div>
               </>
+            ) : pgCfg.backup ? (
+              <p className="faint">
+                {pgCfg.backupServing
+                  ? `Backup in service: it works as ${pgCfg.backupServing}${servingFor ? ` in place of ${servingFor}` : ''} and hands the work back when the cluster recovers.`
+                  : 'Backup node: it serves no traffic and cannot be made primary by hand.'}{' '}
+                It only becomes primary by itself (last resort). To use it as a normal node, uncheck “Backup node”.
+              </p>
             ) : canSwitchover ? (
               <>
                 <p className="faint">
@@ -235,7 +264,7 @@ export function Inspector({ node, issues, role, onClose }: { node: ClusterNode; 
               <p style={{ marginTop: 0 }}>
                 <b>{node.name}</b> becomes the primary and <b>{livePrimary[0].name}</b> becomes its replica. The launcher:
               </p>
-              <ol style={{ margin: '0 0 0 18px', padding: 0, lineHeight: 1.6 }}>
+              <ol style={{ margin: '0 0 0 30px', padding: 0, lineHeight: 1.6 }}>
                 <li>pauses Pgpool-II, so no failover starts on its own;</li>
                 <li>stops {livePrimary[0].name} cleanly and waits until {node.name} replayed all its WAL;</li>
                 <li>promotes {node.name} and points the other replicas at it;</li>
@@ -372,7 +401,7 @@ function ConfigForm({ node, onDeleted }: { node: ClusterNode; onDeleted: () => v
       <div className="label" style={{ marginBottom: 10 }}>
         {TYPE_LABEL[node.type]} settings
       </div>
-      {FIELDS[node.type].map((f) =>
+      {FIELDS[node.type].filter((f) => !f.backupOnly || cfg.backup).map((f) =>
         f.kind === 'bool' ? (
           <label key={f.key} className="check">
             <input type="checkbox" checked={!!cfg[f.key]} onChange={(e) => setCfg({ ...cfg, [f.key]: e.target.checked })} />

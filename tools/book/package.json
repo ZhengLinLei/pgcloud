@@ -1,0 +1,9 @@
+{
+  "name": "pgcloud-book-shots",
+  "private": true,
+  "type": "module",
+  "description": "Screenshots of the PgCloud Launcher for the book",
+  "dependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

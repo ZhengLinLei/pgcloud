@@ -9,14 +9,19 @@ import { MonitorTab } from './tabs/Monitor';
 import { DeployTab } from './tabs/Deploy';
 import { EventsTab } from './tabs/Events';
 import { SettingsTab } from './tabs/Settings';
+import { AuditTab } from './tabs/Audit';
+import { CollapseBanner } from './components/FastSwap';
+import { RecordButton } from './components/Recorder';
+import { AccessAlert } from './components/AccessAlert';
 import { DEMO, DemoWatermark } from './demo/Watermark';
 
-type Tab = 'topology' | 'monitor' | 'deploy' | 'events' | 'settings';
+type Tab = 'topology' | 'monitor' | 'deploy' | 'events' | 'audit' | 'settings';
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'topology', label: 'Topology' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'deploy', label: 'Deploy' },
   { id: 'events', label: 'Events' },
+  { id: 'audit', label: 'Audit' },
   { id: 'settings', label: 'Settings' },
 ];
 
@@ -87,6 +92,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
               </span>
             )}
           </div>
+          <RecordButton />
           <span className="clock mono-num">{new Date(now).toUTCString().slice(5, 25)} UTC</span>
           <button className="btn icon" onClick={toggleTheme} title="Toggle light/dark" aria-label="Toggle theme">
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
@@ -106,13 +112,16 @@ function Shell({ onLogout }: { onLogout: () => void }) {
           </button>
         ))}
       </nav>
+      <CollapseBanner />
       <main className="main">
         {tab === 'topology' && <TopologyTab goDeploy={() => setTab('deploy')} />}
         {tab === 'monitor' && <MonitorTab />}
         {tab === 'deploy' && <DeployTab />}
         {tab === 'events' && <EventsTab />}
+        {tab === 'audit' && <AuditTab />}
         {tab === 'settings' && <SettingsTab />}
       </main>
+      <AccessAlert />
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>

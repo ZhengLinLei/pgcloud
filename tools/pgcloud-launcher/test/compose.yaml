@@ -7,7 +7,9 @@
 #   srv-a  172.30.0.11
 #   srv-b  172.30.0.12
 #   srv-c  172.30.0.13
-# From the host: ssh -p 2211|2212|2213 root@localhost
+#   srv-d  172.30.0.14   (profile "extra": spare servers for backup nodes / fast-swap)
+#   srv-e  172.30.0.15   (profile "extra")
+# From the host: ssh -p 2211|2212|2213|2214|2215 root@localhost
 #
 # FOR TESTING ONLY: privileged containers, fixed passwords.
 name: pgcloud-launcher-test
@@ -73,6 +75,38 @@ services:
       lab:
         ipv4_address: 172.30.0.13
 
+  srv-d:
+    profiles: [extra]   # ./RUN.dev.sh --extra: spare servers for backup nodes and fast-swap
+    build:
+      context: .
+      dockerfile: testhost.Dockerfile
+    image: pgcloud/testhost:dev
+    hostname: srv-d
+    privileged: true
+    volumes:
+      - srv-d-docker:/var/lib/docker
+    ports:
+      - "2214:22"
+    networks:
+      lab:
+        ipv4_address: 172.30.0.14
+
+  srv-e:
+    profiles: [extra]   # ./RUN.dev.sh --extra: spare servers for backup nodes and fast-swap
+    build:
+      context: .
+      dockerfile: testhost.Dockerfile
+    image: pgcloud/testhost:dev
+    hostname: srv-e
+    privileged: true
+    volumes:
+      - srv-e-docker:/var/lib/docker
+    ports:
+      - "2215:22"
+    networks:
+      lab:
+        ipv4_address: 172.30.0.15
+
 networks:
   lab:
     ipam:
@@ -84,3 +118,5 @@ volumes:
   srv-a-docker:
   srv-b-docker:
   srv-c-docker:
+  srv-d-docker:
+  srv-e-docker:

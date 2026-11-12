@@ -14,7 +14,7 @@ This is the entry point of the **PgCloud** project. The node images it deploys a
 
 Source code, manual and book: https://github.com/ZhengLinLei/pgcloud
 
-Tags: `1.1.0`, `1.1`, `latest` (older: `1.0.1`, `1.0.0`, `1.0`). Platforms: `linux/amd64`, `linux/arm64`.
+Tags: `1.2.0`, `1.2`, `latest` (older: `1.1.0`, `1.1`, `1.0.1`, `1.0.0`, `1.0`). Platforms: `linux/amd64`, `linux/arm64`.
 
 ## Quick start
 
@@ -22,7 +22,7 @@ Tags: `1.1.0`, `1.1`, `latest` (older: `1.0.1`, `1.0.0`, `1.0`). Platforms: `lin
 docker run -d --name pgcloud-launcher \
   -p 8080:8080 \
   -v pgcloud-launcher:/data \
-  zhenglinlei/pgcloud-launcher:1.1.0
+  zhenglinlei/pgcloud-launcher:1.2.0
 
 docker logs pgcloud-launcher    # prints the generated admin password
 ```

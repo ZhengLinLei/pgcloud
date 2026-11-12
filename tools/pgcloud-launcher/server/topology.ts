@@ -39,12 +39,30 @@ export function targetsOf(t: Topology, nodeId: string): ClusterNode[] {
     .filter((n): n is ClusterNode => !!n);
 }
 
+/**
+ * Docker / Podman volume left on a host while its PostgreSQL container is stopped on purpose (launcher
+ * Stop): Pgpool-II's failover recovery does not restart a replica that has it.
+ */
+export const STOPPED_MARKER = 'pgcloud_db_stopped';
+
+/** An idle PostgreSQL backup node: replicates but serves no traffic (no Pgpool-II / PgBouncer link). */
+export function isBackup(n: ClusterNode | undefined): boolean {
+  const c = n?.config as Record<string, unknown> | undefined;
+  return !!n && n.type === 'postgres' && !!c?.backup && !c.backupServing;
+}
+
+/** A backup standing in for a failed node: it works as a normal replica / primary until it hands the work back. */
+export function isServingBackup(n: ClusterNode | undefined): boolean {
+  const c = n?.config as Record<string, unknown> | undefined;
+  return !!n && n.type === 'postgres' && !!c?.backup && !!c.backupServing;
+}
+
 export function computeRoles(t: Topology): Record<string, string> {
   const roles: Record<string, string> = {};
   for (const n of t.nodes) {
     if (n.type === 'postgres') {
       const up = targetsOf(t, n.id).filter((x) => x.type === 'postgres');
-      roles[n.id] = up.length ? 'replica' : 'primary';
+      roles[n.id] = up.length ? (isBackup(n) ? 'backup' : 'replica') : 'primary';
     } else if (n.type === 'pgpool') {
       roles[n.id] = 'balancer';
     } else {
@@ -63,7 +81,7 @@ export function primaryOf(t: Topology): ClusterNode | undefined {
 export function pgpoolBackends(t: Topology, pgpoolId: string): ClusterNode[] {
   const roles = computeRoles(t);
   return targetsOf(t, pgpoolId)
-    .filter((n) => n.type === 'postgres')
+    .filter((n) => n.type === 'postgres' && !isBackup(n))
     .sort((a, b) => (roles[a.id] === 'primary' ? -1 : roles[b.id] === 'primary' ? 1 : a.name.localeCompare(b.name)));
 }
 
@@ -150,6 +168,8 @@ export function validate(
     const d = t.nodes.find((n) => n.id === e.target);
     if (!s || !d) continue;
     if (!ALLOWED_LINKS[s.type].includes(d.type)) err(`Invalid link ${s.name} (${s.type}) → ${d.name} (${d.type}).`, s.id);
+    else if (isBackup(d) && s.type !== 'postgres')
+      err(`${d.name} is a backup node: it serves no traffic, so ${s.name} cannot connect to it.`, s.id);
   }
 
   // PostgreSQL
@@ -160,10 +180,35 @@ export function validate(
     err(
       `There are ${primaries.length} primaries (${primaries.map((p) => p.name).join(', ')}). Connect every replica to the primary.`,
     );
-  for (const n of pgs.filter((x) => roles[x.id] === 'replica')) {
+  for (const n of pgs.filter((x) => roles[x.id] === 'replica' || roles[x.id] === 'backup')) {
     const up = targetsOf(t, n.id).filter((x) => x.type === 'postgres');
     if (up.length > 1) err(`${n.name}: a replica can only stream from one primary.`, n.id);
-    if (up.some((u) => roles[u.id] !== 'primary')) err(`${n.name}: cascading replication is not supported; connect it to the primary.`, n.id);
+    // fast-swap nodes may stream from a replica (emergency copy when no primary is left)
+    if (!(n.config as Record<string, unknown>).fastSwap && up.some((u) => roles[u.id] !== 'primary'))
+      err(`${n.name}: cascading replication is not supported; connect it to the primary.`, n.id);
+  }
+  for (const n of pgs.filter((x) => isBackup(x) && roles[x.id] === 'primary'))
+    err(`${n.name}: a backup node must stream from the primary (connect it to the primary).`, n.id);
+  if (pgs.length && pgs.every((n) => isBackup(n))) err('Every PostgreSQL node is a backup: at least the primary must be a normal node.');
+  for (const n of pgs.filter(isServingBackup)) {
+    const c = n.config as unknown as PostgresConfig;
+    const forName = t.nodes.find((x) => x.id === c.backupFor)?.name ?? 'a failed node';
+    issues.push({
+      level: 'warning',
+      code: 'backup-serving',
+      nodeId: n.id,
+      message: `Backup ${n.name} is serving as ${c.backupServing} in place of ${forName}. ${
+        c.backupReturn === false ? '' : `It returns to backup when ${forName} is back and stable.`
+      }`.trim(),
+    });
+  }
+  for (const n of pgs.filter((x) => (x.config as unknown as PostgresConfig).promotedFromBackup)) {
+    issues.push({
+      level: 'warning',
+      code: 'backup-promoted',
+      nodeId: n.id,
+      message: `${n.name}, previously a backup node, was promoted to a system node on ${new Date((n.config as unknown as PostgresConfig).promotedFromBackup!).toLocaleString()}: it serves traffic and no longer returns to backup.`,
+    });
   }
   const primary = primaries[0];
   // After an automatic failover the running roles differ from the drawing. Deploying the drawing
@@ -213,7 +258,7 @@ export function validate(
       warn(`${b.name}: it points to a replica, so it will only accept read-only queries.`, b.id);
   }
 
-  const order: Record<string, number> = { primary: 0, replica: 1, balancer: 2, pooler: 3 };
+  const order: Record<string, number> = { primary: 0, replica: 1, backup: 1, balancer: 2, pooler: 3 };
   const plan: PlanStep[] = [...t.nodes]
     .sort((a, b) => order[roles[a.id]] - order[roles[b.id]] || a.name.localeCompare(b.name))
     .map((n) => ({ nodeId: n.id, name: n.name, type: n.type, role: roles[n.id], host: sshOf(n.id).host }));
@@ -268,6 +313,9 @@ export function generateFiles(node: ClusterNode, ctx: GenContext): GeneratedFile
     const role = roles[node.id];
     const primary = primaryOf(t);
     const replicas = t.nodes.filter((n) => n.type === 'postgres' && roles[n.id] === 'replica');
+    // A replica / backup streams from the PostgreSQL node it links to (the primary, or for a fast-swap
+    // node possibly a replica)
+    const upstream = role === 'primary' ? undefined : targetsOf(t, node.id).find((x) => x.type === 'postgres') ?? primary;
     const sync = c.synchronous && replicas.length > 0;
     return {
       files: {
@@ -286,14 +334,14 @@ export function generateFiles(node: ClusterNode, ctx: GenContext): GeneratedFile
           WORK_MEM: c.workMem,
           EFFECTIVE_CACHE_SIZE: c.effectiveCacheSize,
           MAINTENANCE_WORK_MEM: c.maintenanceWorkMem,
-          NODE_ROLE: role,
+          NODE_ROLE: role === 'primary' ? 'primary' : 'replica',
           BACKEND_NAME: node.name,
           REPLICA_USER: cluster.replicaUser,
           REPLICA_PASS: secrets.replicaPassword,
           SYNCHRONOUS_RULE: sync ? 'FIRST 1' : '',
           SYNCHRONOUS_NAME: sync ? '*' : '',
-          PRIMARY_HOST: role === 'replica' && primary ? primary.address : '127.0.0.1',
-          PRIMARY_PORT: role === 'replica' && primary ? (primary.config as unknown as PostgresConfig).port : c.port,
+          PRIMARY_HOST: upstream ? upstream.address : '127.0.0.1',
+          PRIMARY_PORT: upstream ? (upstream.config as unknown as PostgresConfig).port : c.port,
           PROMOTE_MIN_DELAY: c.promoteMinDelay,
           // The other PostgreSQL nodes: at start an old primary checks them for a newer primary
           PEER_HOSTS: t.nodes
@@ -347,7 +395,8 @@ export function generateFiles(node: ClusterNode, ctx: GenContext): GeneratedFile
         // Do not start the old primary here (it would come back as a primary): just check the
         // container exists; FAILOVER_DEPROMOTE_CMD rewinds it and starts it as a replica.
         FAILOVER_RECOVERY_PRIMARY_CMD: `${rt} inspect ${CONTAINER_NAME.postgres} >/dev/null`,
-        FAILOVER_RECOVERY_REPLICA_CMD: `${rt} restart ${CONTAINER_NAME.postgres}`,
+        // a replica stopped on purpose (launcher Stop leaves the volume pgcloud_db_stopped as a marker) is not restarted
+        FAILOVER_RECOVERY_REPLICA_CMD: `! ${rt} volume inspect ${STOPPED_MARKER} >/dev/null 2>&1 && ${rt} restart ${CONTAINER_NAME.postgres}`,
         FAILOVER_PROMOTE_CMD: `${rt} container exec ${CONTAINER_NAME.postgres} bash -c 'pgcloud_promote %x %r'`,
         FAILOVER_REDIRECT_CMD: `${rt} container exec ${CONTAINER_NAME.postgres} bash -c 'pgcloud_redirect %h %p %x %r'`,
         // Old primary -> replica: stop it cleanly, pg_rewind it against the new primary in a one-off

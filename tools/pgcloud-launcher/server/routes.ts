@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
-import { NODE_TYPES, type NodeType, type SettingsInput } from '../shared/types.js';
+import { NODE_TYPES, type NodeType, type SettingsInput, type SshInput } from '../shared/types.js';
 import {
   createEdge,
   createNode,
@@ -41,6 +41,11 @@ import {
   reattachBackends,
   rejoinNode,
   rebuildCluster,
+  diagnoseAccess,
+  promoteNode,
+  collapseRisk,
+  fastSwap,
+  freshestNode,
   runNodeAction,
   switchover,
   watchdogInfo,
@@ -51,6 +56,7 @@ import {
 } from './deploy.js';
 import { ALLOWED_LINKS, computeRoles, generateFiles, targetsOf } from './topology.js';
 import { liveSnapshot } from './monitor.js';
+import { deleteRecording, getRecording, listRecordings, recordingAsText, renameRecording, startRecording, stopRecording } from './audit.js';
 import { paths } from './env.js';
 
 const badRequest = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
@@ -158,6 +164,48 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     api.post<{ Params: { id: string } }>('/api/nodes/:id/watchdog-leader', async (req) => makeWatchdogLeader(req.params.id));
 
     api.get('/api/watchdog', async () => watchdogInfo());
+
+    /** Can applications connect? Causes and solutions when no entry point accepts connections. */
+    api.get('/api/access', async () => diagnoseAccess());
+    /** Promote a running replica when no primary is left. */
+    api.post<{ Params: { id: string } }>('/api/nodes/:id/promote', async (req) => promoteNode(req.params.id));
+
+    // ---------------------------------------------- fast-swap (emergency copy of the freshest data)
+    api.get('/api/fast-swap/plan', async () => {
+      const src = await freshestNode();
+      return {
+        risk: collapseRisk(),
+        source: src ? { id: src.node.id, name: src.node.name, address: src.node.address, role: src.role, timeline: src.timeline, lsn: src.lsn } : null,
+        method: 'pg_basebackup over streaming replication',
+      };
+    });
+    api.post<{ Body: { name?: string; address?: string; ssh?: SshInput } }>('/api/fast-swap', async (req) => {
+      if (!req.body?.ssh) throw badRequest('Enter the SSH access of the new server');
+      return fastSwap({ name: req.body.name, address: req.body.address, ssh: req.body.ssh });
+    });
+
+    // ---------------------------------------------- audit recordings
+    api.get('/api/recordings', async () => listRecordings());
+    api.post<{ Body: { name?: string } }>('/api/recordings/start', async (req) => startRecording(req.body?.name));
+    api.post('/api/recordings/stop', async () => stopRecording());
+    api.patch<{ Params: { id: string }; Body: { name?: string } }>('/api/recordings/:id', async (req) =>
+      renameRecording(req.params.id, req.body?.name ?? ''),
+    );
+    api.get<{ Params: { id: string } }>('/api/recordings/:id', async (req) => getRecording(req.params.id));
+    api.get<{ Params: { id: string }; Querystring: { format?: string } }>('/api/recordings/:id/download', async (req, reply) => {
+      const { recording } = getRecording(req.params.id);
+      const base = `pgcloud-audit-${recording.startedAt.slice(0, 19).replace(/[:T]/g, '-')}`;
+      if (req.query.format === 'json') {
+        reply.header('content-disposition', `attachment; filename="${base}.json"`).type('application/json');
+        return JSON.stringify({ recording, entries: getRecording(req.params.id).entries }, null, 2);
+      }
+      reply.header('content-disposition', `attachment; filename="${base}.log"`).type('text/plain; charset=utf-8');
+      return recordingAsText(req.params.id);
+    });
+    api.delete<{ Params: { id: string } }>('/api/recordings/:id', async (req) => {
+      deleteRecording(req.params.id);
+      return { ok: true };
+    });
 
     /** Re-attach the running backends that this Pgpool-II node keeps detached. */
     api.post<{ Params: { id: string } }>('/api/nodes/:id/reattach', async (req) => reattachBackends(req.params.id));

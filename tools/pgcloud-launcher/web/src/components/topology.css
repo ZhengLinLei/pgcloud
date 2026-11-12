@@ -352,3 +352,39 @@
     display: none;
   }
 }
+
+/* backup nodes: stream from the primary, serve no traffic */
+.pg-node.backup {
+  border-style: dashed;
+  background: repeating-linear-gradient(135deg, var(--panel), var(--panel) 8px, var(--panel-2) 8px, var(--panel-2) 16px);
+}
+/* a backup standing in for a failed node: it works like a normal node until it hands the work back */
+.pg-node.backup.serving {
+  border-style: solid;
+  border-color: var(--warn);
+  background: var(--panel);
+}
+
+/* selected link */
+.edge-label {
+  cursor: pointer;
+}
+.edge-label.selected {
+  outline: 1px solid var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.edge-remove {
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font: inherit;
+  font-size: 9px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.edge-remove:hover {
+  background: var(--danger);
+  color: #fff;
+}

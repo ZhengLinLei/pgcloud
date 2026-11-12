@@ -558,7 +558,8 @@ _main() {
 			#     primary, failed, and a replica was promoted while it was down)
 			# What to do is STALE_PRIMARY: "rejoin" (default) = become a replica of the current primary
 			# (pg_rewind, or a fresh copy if that fails); "wait" = do not start, the operator decides.
-			pg_query() { PGPASSWORD="$POSTGRES_PASSWORD" PGCONNECT_TIMEOUT=5 psql -h "$1" -p "$2" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$3" 2>/dev/null; }
+			# an unreachable peer (psql exit 2) is normal here, e.g. during a full outage: it must not abort the script (set -e)
+			pg_query() { PGPASSWORD="$POSTGRES_PASSWORD" PGCONNECT_TIMEOUT=5 psql -h "$1" -p "$2" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "$3" 2>/dev/null || true; }
 			rejoin_target=""
 			if [ ! -f "$PGDATA/standby.signal" ]; then
 				if [ "$NODE_ROLE" = "replica" ] && [ -n "$PRIMARY_HOST" ]; then
@@ -570,7 +571,7 @@ _main() {
 						pglog "Replica role but primary data found: must rejoin $rejoin_target"
 					fi
 				elif [ -n "$PEER_HOSTS" ]; then
-					my_tl=$(pg_controldata -D "$PGDATA" 2>/dev/null | sed -n "s/^Latest checkpoint's TimeLineID: *//p")
+					my_tl=$(pg_controldata -D "$PGDATA" 2>/dev/null | sed -n "s/^Latest checkpoint's TimeLineID: *//p" || true)
 					for peer in ${PEER_HOSTS//,/ }; do
 						# current timeline of a running primary (from its WAL file name); empty on replicas / unreachable
 						tl=$(pg_query "${peer%:*}" "${peer##*:}" "SELECT CASE WHEN pg_is_in_recovery() THEN '' ELSE ('x' || substr(pg_walfile_name(pg_current_wal_lsn()), 1, 8))::bit(32)::int::text END")

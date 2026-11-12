@@ -37,6 +37,29 @@ export interface PostgresConfig {
   maintenanceWorkMem: string;
   weight: number;
   promoteMinDelay: number;
+  /** Backup node: streams from the primary but serves no traffic (no Pgpool-II / PgBouncer link). */
+  backup?: boolean;
+  /** Backup: replace a PostgreSQL node that is down (keeps the number of replicas). */
+  backupReplace?: boolean;
+  /** Backup: become the primary when every other PostgreSQL node is down. */
+  backupLastResort?: boolean;
+  /** Backup: higher is used first when several backups can act. */
+  backupPriority?: number;
+  /** Backup: seconds a node must stay down before the backup acts. */
+  backupGraceSec?: number;
+  /**
+   * Backup: once the cluster has recovered (the node it replaced is back and stable), hand the work back
+   * and become a backup again. Off = the first time it acts, it becomes a normal (system) node for good.
+   */
+  backupReturn?: boolean;
+  /** Set by the launcher while a backup stands in for a failed node: the role it is serving as. */
+  backupServing?: 'replica' | 'primary';
+  /** Set by the launcher while a backup stands in: id of the node it replaces. */
+  backupFor?: string;
+  /** Set by the launcher when a backup became a system node for good (ISO date); cleared when the notice is dismissed. */
+  promotedFromBackup?: string;
+  /** Created by fast-swap (emergency copy of the freshest data). */
+  fastSwap?: boolean;
 }
 
 export interface PgpoolConfig {
@@ -179,6 +202,43 @@ export interface Deployment {
   finishedAt: string | null;
 }
 
+/** One way out of an outage, offered by the launcher when no entry point accepts connections. */
+export interface AccessSolution {
+  key: string;
+  title: string;
+  detail: string;
+  /** 'auto' = the launcher already does it by itself; 'danger' = destructive */
+  kind: 'action' | 'auto' | 'info' | 'danger';
+  /** API call that applies it (POST); `ui` opens a dialog of the UI instead */
+  action?: { path: string; body?: Record<string, unknown>; confirm?: string };
+  ui?: 'fastswap' | 'rebuild';
+}
+
+export interface AccessReport {
+  accessible: boolean;
+  entries: Array<{ id: string; name: string; type: NodeType; status: NodeStatus; error?: string }>;
+  causes: string[];
+  solutions: AccessSolution[];
+}
+
+export interface Recording {
+  id: string;
+  name: string;
+  status: 'recording' | 'collecting' | 'ready' | 'failed';
+  startedAt: string;
+  endedAt: string | null;
+  entries: number;
+  error?: string;
+}
+
+export interface AuditEntry {
+  ts: string;
+  source: 'event' | 'operation' | 'container' | 'failover' | 'launcher';
+  node: string | null;
+  level: 'info' | 'warn' | 'error';
+  text: string;
+}
+
 export type WsMessage =
   | { type: 'live'; nodes: Record<string, NodeLive> }
   | { type: 'log'; deploymentId: string; line: string; level?: string }
@@ -188,7 +248,7 @@ export type WsMessage =
 
 export const NODE_TYPES: NodeType[] = ['postgres', 'pgpool', 'pgbouncer'];
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.2.0';
 
 /** Image names used by the "build", "tar.gz" and "on hosts" sources. */
 export const LOCAL_IMAGES = {
@@ -214,6 +274,12 @@ export const DEFAULT_CONFIG: Record<NodeType, Record<string, unknown>> = {
     maintenanceWorkMem: '64MB',
     weight: 1,
     promoteMinDelay: 0,
+    backup: false,
+    backupReplace: true,
+    backupLastResort: true,
+    backupPriority: 10,
+    backupGraceSec: 60,
+    backupReturn: true,
   } satisfies PostgresConfig,
   pgpool: {
     port: 5434,

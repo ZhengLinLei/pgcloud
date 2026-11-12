@@ -1,5 +1,0 @@
-- When primary fails, one replica takes control. Everything fine until the old primary is back, the system now has split-brain. Decide algorithm to recover primary to replica or ask user to backup again manually or by launcher
-
-- Also when primary fails, on become primary and other replicas start replicating the new node. But visually on the launcher stills linked to the old primary. Must change links when failover happens.
-
-- Audit record of logs (This is helpfull for detect anomalies)

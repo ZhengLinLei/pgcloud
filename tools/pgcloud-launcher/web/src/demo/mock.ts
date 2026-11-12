@@ -1,6 +1,6 @@
 // Front-end only demo: answers the launcher API in the browser from a recorded snapshot of a real
 // PgCloud cluster (snapshot.json) and simulates the live monitoring feed. Nothing leaves the page.
-import type { ClusterEdge, ClusterEvent, ClusterNode, Deployment, NodeLive, NodeType, WsMessage } from '../../../shared/types';
+import type { AuditEntry, ClusterEdge, ClusterEvent, ClusterNode, Deployment, NodeLive, NodeType, Recording, WsMessage } from '../../../shared/types';
 import { ApiError } from '../api';
 import raw from './snapshot.json';
 
@@ -152,9 +152,115 @@ function route(path: string, method: string, body: Record<string, unknown> | und
   }
   if (path === '/api/autolink') return { created: 0 };
 
+  // Audit recordings: one recorded from the snapshot, and the ones made with REC in the demo
+  if (path === '/api/recordings') return { recordings: recordings.list.map((x) => x.recording), current: recordings.current };
+  if (path === '/api/recordings/start' && method === 'POST') {
+    if (recordings.current) throw new ApiError('A recording is already running', 400);
+    const name = String(body?.name ?? '').trim() || `Recording ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+    recordings.current = { id: uid(), name, status: 'recording', startedAt: new Date().toISOString(), endedAt: null, entries: 0 };
+    recordings.list.unshift({ recording: recordings.current, entries: [] });
+    event('info', `Audit recording started: ${name}`);
+    return recordings.current;
+  }
+  if (path === '/api/recordings/stop' && method === 'POST') {
+    const cur = recordings.current;
+    if (!cur) throw new ApiError('No recording is running', 400);
+    recordings.current = null;
+    Object.assign(cur, { status: 'collecting', endedAt: new Date().toISOString() });
+    event('info', `Audit recording stopped: ${cur.name}; collecting the logs of every node`);
+    setTimeout(() => {
+      const rec = recordings.list.find((x) => x.recording.id === cur.id)!;
+      rec.entries = ([
+        ...st.events.filter((e) => e.ts >= cur.startedAt && e.ts <= cur.endedAt!).map(eventEntry),
+        { ts: cur.endedAt!, source: 'launcher', node: null, level: 'info', text: 'Demo: no servers behind this page, so only the launcher events of the window are recorded' },
+      ] as AuditEntry[]).sort(byTs);
+      Object.assign(cur, { status: 'ready', entries: rec.entries.length });
+      event('success', `Audit recording ready: ${cur.name} (${rec.entries.length} entries)`);
+    }, 1200);
+    return cur;
+  }
+  if ((r = m(/^\/api\/recordings\/([^/]+)$/))) {
+    const rec = recordings.list.find((x) => x.recording.id === r![1]);
+    if (!rec) throw new ApiError('Recording not found', 404);
+    if (method === 'PATCH') {
+      const name = String(body?.name ?? '').trim();
+      if (!name) throw new ApiError('Give the recording a name', 400);
+      rec.recording.name = name.slice(0, 120);
+      return rec.recording;
+    }
+    if (method === 'DELETE') {
+      if (rec.recording.status === 'recording' || rec.recording.status === 'collecting') throw new ApiError('Stop the recording first', 400);
+      recordings.list = recordings.list.filter((x) => x !== rec);
+      return { ok: true };
+    }
+    return structuredClone(rec);
+  }
+
   // Everything that would touch real servers
   throw new ApiError(READ_ONLY, 403);
 }
+
+// ------------------------------------------------------------------ audit recordings
+const byTs = (a: AuditEntry, b: AuditEntry) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0);
+const levelOf = (text: string): AuditEntry['level'] =>
+  /\b(FATAL|PANIC|ERROR|fail(ed)?\b|✖)/i.test(text) ? 'error' : /\b(WARNING|WARN|degraded)/i.test(text) ? 'warn' : 'info';
+const nameOf = (id: string | null) => st.nodes.find((n) => n.id === id)?.name ?? null;
+const eventEntry = (e: ClusterEvent): AuditEntry => ({
+  ts: e.ts,
+  source: 'event',
+  node: nameOf(e.nodeId),
+  level: e.level === 'success' ? 'info' : e.level,
+  text: e.message,
+});
+
+/** The recording the launcher would have made of the deployment captured in the snapshot (same sources and parsing). */
+function snapshotRecording(): { recording: Recording; entries: AuditEntry[] } {
+  const entries: AuditEntry[] = st.events.map(eventEntry);
+  for (const d of st.deployments) {
+    entries.push({ ts: d.startedAt, source: 'operation', node: null, level: 'info', text: `▶ ${d.action} ${d.target} (${d.status})` });
+    const day = new Date(new Date(d.startedAt).getTime() - shift).toISOString().slice(0, 10); // log lines carry the original time
+    for (const line of (snap.logs[d.id] ?? '').split('\n')) {
+      const m = /^\[(\w+)\] (\d\d:\d\d:\d\d) (.*)$/.exec(line);
+      if (!m) continue;
+      const level = m[1] === 'error' ? 'error' : m[1] === 'warn' ? 'warn' : 'info';
+      // lines carry whole seconds: never before the start of their operation
+      const ts = iso(`${day}T${m[2]}.000Z`)!;
+      entries.push({ ts: ts < d.startedAt ? d.startedAt : ts, source: 'operation', node: null, level, text: `${d.action} ${d.target}: ${m[3]}` });
+    }
+  }
+  // container logs: PostgreSQL / PgBouncer / Pgpool-II lines start with their own UTC time; lines without one
+  // (start-up banners) take the time of the next line that has one
+  for (const [id, v] of Object.entries(snap.nodeLogs as Record<string, { logs?: string }>)) {
+    const node = nameOf(id);
+    if (!node) continue;
+    const pending: string[] = [];
+    for (const line of (v.logs ?? '').split('\n')) {
+      const m = /^(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d(?:\.\d+)?)(?: UTC)?:?\s+(.*)$/.exec(line);
+      if (!m) {
+        if (line.trim()) pending.push(line.trim());
+        continue;
+      }
+      const ts = iso(new Date(`${m[1]}T${m[2]}Z`).toISOString())!;
+      for (const p of pending.splice(0)) entries.push({ ts, source: 'container', node, level: levelOf(p), text: p });
+      entries.push({ ts, source: 'container', node, level: levelOf(m[3]), text: m[3] });
+    }
+  }
+  entries.sort(byTs);
+  const recording: Recording = {
+    id: 'demo-deployment',
+    name: 'Cluster deployment',
+    status: 'ready',
+    startedAt: entries[0]?.ts ?? new Date().toISOString(),
+    endedAt: entries[entries.length - 1]?.ts ?? null,
+    entries: entries.length,
+  };
+  return { recording, entries };
+}
+
+const recordings: { list: Array<{ recording: Recording; entries: AuditEntry[] }>; current: Recording | null } = {
+  list: [snapshotRecording()],
+  current: null,
+};
 
 // ------------------------------------------------------------------ live feed (replaces the WebSocket)
 const jitter = (v: number | null, pct: number) => (v === null ? null : Math.max(0, v * (1 + (Math.random() * 2 - 1) * pct)));

@@ -10,6 +10,7 @@ import {
   useReactFlow,
   type Connection,
   type Edge,
+  type EdgeChange,
   type NodeChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -25,10 +26,11 @@ import { FitIcon, LinkIcon, RocketIcon, TYPE_COLOR, TYPE_LABEL, TypeIcon } from 
 const nodeTypes = { pg: PgNode };
 const edgeTypes = { status: StatusEdge };
 
-const PALETTE: Array<{ type: NodeType; hint: string }> = [
-  { type: 'postgres', hint: 'primary or replica' },
-  { type: 'pgpool', hint: 'load balancer · failover' },
-  { type: 'pgbouncer', hint: 'connection pooler' },
+const PALETTE: Array<{ key: string; type: NodeType; hint: string; label?: string; config?: Record<string, unknown> }> = [
+  { key: 'postgres', type: 'postgres', hint: 'primary or replica' },
+  { key: 'backup', type: 'postgres', label: 'Backup', hint: 'standby · no traffic · takes over', config: { backup: true } },
+  { key: 'pgpool', type: 'pgpool', hint: 'load balancer · failover' },
+  { key: 'pgbouncer', type: 'pgbouncer', hint: 'connection pooler' },
 ];
 
 function worst(a: NodeStatus | undefined, b: NodeStatus | undefined): NodeStatus {
@@ -41,6 +43,12 @@ function worst(a: NodeStatus | undefined, b: NodeStatus | undefined): NodeStatus
 function Canvas({ goDeploy }: { goDeploy: () => void }) {
   const { nodes, edges, live, validation, toast, current } = useStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // links are controlled too: React Flow's own selection would be lost on the next render
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const removeEdge = useCallback((id: string) => {
+    setSelectedEdgeId(null);
+    void del(`/api/edges/${id}`);
+  }, []);
   const [rfNodes, setRfNodes, onNodesChangeBase] = useNodesState<PgFlowNode>([]);
   const dragging = useRef(new Set<string>());
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -107,11 +115,31 @@ function Canvas({ goDeploy }: { goDeploy: () => void }) {
               ? { sourceHandle: 'r', targetHandle: 'l' }
               : { sourceHandle: 'ls', targetHandle: 'rt' }
             : { sourceHandle: 'b', targetHandle: 't' }),
-          data: { status: worst(live[e.source]?.status, live[e.target]?.status), label, kind },
+          selected: e.id === selectedEdgeId,
+          data: {
+            status: worst(live[e.source]?.status, live[e.target]?.status),
+            label,
+            kind,
+            onSelect: (id: string) => {
+              setSelectedEdgeId(id);
+              setSelectedId(null);
+            },
+            onRemove: removeEdge,
+          },
         };
       }),
-    [edges, nodes, live],
+    [edges, nodes, live, selectedEdgeId, removeEdge],
   );
+
+  const onEdgesChange = useCallback((changes: EdgeChange<StatusFlowEdge>[]) => {
+    for (const c of changes) {
+      if (c.type !== 'select') continue;
+      if (c.selected) {
+        setSelectedEdgeId(c.id);
+        setSelectedId(null);
+      } else setSelectedEdgeId((cur) => (cur === c.id ? null : cur));
+    }
+  }, []);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<PgFlowNode>[]) => {
@@ -122,7 +150,10 @@ function Canvas({ goDeploy }: { goDeploy: () => void }) {
             dragging.current.delete(c.id);
           }
         }
-        if (c.type === 'select' && c.selected) setSelectedId(c.id);
+        if (c.type === 'select' && c.selected) {
+          setSelectedId(c.id);
+          setSelectedEdgeId(null);
+        }
       }
       onNodesChangeBase(changes.filter((c) => c.type !== 'remove'));
     },
@@ -159,14 +190,15 @@ function Canvas({ goDeploy }: { goDeploy: () => void }) {
   );
 
   const onEdgesDelete = useCallback((deleted: Edge[]) => {
+    setSelectedEdgeId(null);
     for (const e of deleted) void del(`/api/edges/${e.id}`);
   }, []);
 
   const addNode = useCallback(
-    async (type: NodeType, position?: { x: number; y: number }) => {
+    async (type: NodeType, position?: { x: number; y: number }, config?: Record<string, unknown>) => {
       const pos = position ?? screenToFlowPosition({ x: window.innerWidth / 2 - 120, y: window.innerHeight / 2 - 60 });
       try {
-        const n = await post<{ id: string }>('/api/nodes', { type, x: Math.round(pos.x), y: Math.round(pos.y) });
+        const n = await post<{ id: string }>('/api/nodes', { type, x: Math.round(pos.x), y: Math.round(pos.y), ...(config ? { config } : {}) });
         setSelectedId(n.id);
       } catch (e) {
         toast((e as Error).message, 'error');
@@ -178,9 +210,9 @@ function Canvas({ goDeploy }: { goDeploy: () => void }) {
   const onDrop = useCallback(
     (e: DragEvent) => {
       e.preventDefault();
-      const type = e.dataTransfer.getData('application/pgcloud-node') as NodeType;
-      if (!type) return;
-      void addNode(type, screenToFlowPosition({ x: e.clientX - 118, y: e.clientY - 40 }));
+      const p = PALETTE.find((x) => x.key === e.dataTransfer.getData('application/pgcloud-node'));
+      if (!p) return;
+      void addNode(p.type, screenToFlowPosition({ x: e.clientX - 118, y: e.clientY - 40 }), p.config);
     },
     [addNode, screenToFlowPosition],
   );
@@ -200,9 +232,20 @@ function Canvas({ goDeploy }: { goDeploy: () => void }) {
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}
           onConnect={onConnect}
+          onEdgesChange={onEdgesChange}
           onEdgesDelete={onEdgesDelete}
-          onPaneClick={() => setSelectedId(null)}
-          onNodeClick={(_, n) => setSelectedId(n.id)}
+          onEdgeClick={(_, e) => {
+            setSelectedEdgeId(e.id);
+            setSelectedId(null);
+          }}
+          onPaneClick={() => {
+            setSelectedId(null);
+            setSelectedEdgeId(null);
+          }}
+          onNodeClick={(_, n) => {
+            setSelectedId(n.id);
+            setSelectedEdgeId(null);
+          }}
           connectionMode={ConnectionMode.Loose}
           deleteKeyCode={['Backspace', 'Delete']}
           minZoom={0.2}
@@ -229,22 +272,22 @@ function Canvas({ goDeploy }: { goDeploy: () => void }) {
           <div className="panel-body">
           {PALETTE.map((p) => (
             <button
-              key={p.type}
+              key={p.key}
               className="palette-item"
               style={{ ['--c' as string]: TYPE_COLOR[p.type] }}
               draggable
               onDragStart={(e) => {
-                e.dataTransfer.setData('application/pgcloud-node', p.type);
+                e.dataTransfer.setData('application/pgcloud-node', p.key);
                 e.dataTransfer.effectAllowed = 'move';
               }}
-              onClick={() => addNode(p.type)}
+              onClick={() => addNode(p.type, undefined, p.config)}
               title="Click or drag onto the canvas"
             >
               <span className="pg-node-icon">
                 <TypeIcon type={p.type} size={13} />
               </span>
               <span>
-                {TYPE_LABEL[p.type]}
+                {p.label ?? TYPE_LABEL[p.type]}
                 <small>{p.hint}</small>
               </span>
             </button>

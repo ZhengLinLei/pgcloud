@@ -3,6 +3,7 @@
 # this checkout (tools/pgcloud-launcher/test/compose.yaml). FOR TESTING ONLY: fixed passwords.
 #   ./RUN.dev.sh                -> build and start the launcher + srv-a, srv-b, srv-c
 #   ./RUN.dev.sh --servers      -> only the 3 servers (for a launcher you already run, e.g. ./RUN.sh)
+#   ./RUN.dev.sh --extra        -> also srv-d and srv-e (spare servers for backup nodes and fast-swap)
 #   ./RUN.dev.sh -p 8081        -> launcher on another port (default 8080)
 #   ./RUN.dev.sh --status       -> what is running
 #   ./RUN.dev.sh --logs         -> follow the launcher logs
@@ -19,11 +20,13 @@ COMPOSE_FILE=tools/pgcloud-launcher/test/compose.yaml
 NETWORK=pgcloud-launcher-test_lab
 ACTION=up
 SERVICES=(launcher srv-a srv-b srv-c)
+EXTRA=false
 export LAUNCHER_PORT="${LAUNCHER_PORT:-8080}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --servers) SERVICES=(srv-a srv-b srv-c) ;;
+    --extra) EXTRA=true ;;
     -p|--port) LAUNCHER_PORT="$2"; shift ;;
     --status) ACTION=status ;;
     --logs) ACTION=logs ;;
@@ -42,11 +45,11 @@ dc() { docker compose -f "$COMPOSE_FILE" "$@"; }
 case "$ACTION" in
   status) dc ps; exit 0 ;;
   logs) exec docker compose -f "$COMPOSE_FILE" logs -f launcher ;;
-  stop) dc stop; info "Stopped (./RUN.dev.sh starts it again, ./RUN.dev.sh --reset deletes it)"; exit 0 ;;
+  stop) dc --profile extra stop; info "Stopped (./RUN.dev.sh starts it again, ./RUN.dev.sh --reset deletes it)"; exit 0 ;;
   reset)
     ASSUME_YES="${ASSUME_YES:-false}"
     confirm "Delete the playground: containers, the servers' Docker data and the launcher data?" || die "cancelled"
-    dc down -v --remove-orphans
+    dc --profile extra down -v --remove-orphans
     info "Playground deleted"
     exit 0 ;;
 esac
@@ -59,10 +62,13 @@ if $WITH_LAUNCHER && ! dc ps --status running --services 2>/dev/null | grep -qx 
 fi
 
 info "Building and starting: ${SERVICES[*]} (the first build takes a few minutes)"
-dc up -d --build "${SERVICES[@]}"
+$EXTRA && SERVICES+=(srv-d srv-e)
+dc --profile extra up -d --build "${SERVICES[@]}"
 
 info "Waiting for the servers' Docker daemons"
-for srv in srv-a srv-b srv-c; do
+SRVS="srv-a srv-b srv-c"
+$EXTRA && SRVS="$SRVS srv-d srv-e"
+for srv in $SRVS; do
   for _ in $(seq 1 60); do
     dc exec -T "$srv" docker info >/dev/null 2>&1 && break
     sleep 1
@@ -75,6 +81,10 @@ cat <<EOF
     srv-a   172.30.0.11     ssh -p 2211 root@localhost
     srv-b   172.30.0.12     ssh -p 2212 root@localhost
     srv-c   172.30.0.13     ssh -p 2213 root@localhost
+EOF
+$EXTRA && cat <<EOF
+    srv-d   172.30.0.14     ssh -p 2214 root@localhost   (spare: backup / fast-swap)
+    srv-e   172.30.0.15     ssh -p 2215 root@localhost   (spare: backup / fast-swap)
 EOF
 
 if $WITH_LAUNCHER; then

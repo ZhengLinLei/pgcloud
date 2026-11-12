@@ -307,9 +307,9 @@ export function SettingsTab() {
                 (never a second primary); you choose Rejoin or Rebuild in its inspector. Redeploy the PostgreSQL nodes to apply.
               </small>
             </div>
-            <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={s.autoHeal !== false} onChange={(e) => set({ autoHeal: e.target.checked })} />
-              <span style={{ textTransform: 'none', letterSpacing: 0 }}>
+            <label className="check" style={{ alignItems: 'flex-start', marginTop: 4 }}>
+              <input type="checkbox" style={{ marginTop: 3, flex: '0 0 auto' }} checked={s.autoHeal !== false} onChange={(e) => set({ autoHeal: e.target.checked })} />
+              <span>
                 Auto-heal: after an outage, rejoin old primaries (with "rejoin automatically") and re-attach healthy nodes that
                 Pgpool-II keeps detached
               </span>
