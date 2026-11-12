@@ -84,3 +84,11 @@
     height: 70vh;
   }
 }
+
+/* destroy & rebuild */
+.danger-zone {
+  border-color: var(--danger);
+}
+.danger-zone .panel-title {
+  color: var(--danger);
+}

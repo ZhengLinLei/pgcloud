@@ -838,6 +838,19 @@ export function reattachBackends(poolId: string): Deployment {
       await onNode(pool, async (s, rt) => {
         log.line(`${pool.name}: pcp_attach_node ${d.backendId} (${d.node.name}${d.isPrimary ? ', primary' : ''})`, 'cmd');
         await s.run(`${rt} exec ${CONTAINER_NAME.pgpool} ./tools/attach.sh ${d.backendId}`, { sudo: true, onData: log.stream() });
+        // With the watchdog, a standby Pgpool-II forwards the request to the leader; if the leader already
+        // has the node up nothing is sent back and this node stays out of sync. A restart makes it copy
+        // the backend states from the leader when it joins the watchdog again.
+        await sleep(3000);
+        const info = await s.exec(
+          `${rt} exec ${CONTAINER_NAME.pgpool} sh -c 'pcp_node_info -h 127.0.0.1 -p $PCP_PORT -U $PCP_USER -w -v -n ${d.backendId}'`,
+          { sudo: true },
+        );
+        if (/Status Name\s*:\s*(down|quarantine)/i.test(info.stdout)) {
+          log.line(`${pool.name} still sees ${d.node.name} down (out of sync with the watchdog leader): restarting ${pool.name}`, 'warn');
+          await s.run(`${rt} restart -t 10 ${CONTAINER_NAME.pgpool}`, { sudo: true });
+          await waitHealthy(s, rt, pool, log, 120);
+        }
       });
       emitEvent('success', `${pool.name}: ${d.node.name} attached again`, pool.id);
     }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { HUB_IMAGES, LOCAL_IMAGES } from '../../../shared/types';
-import type { ImageSource, NodeType, RuntimeChoice, SettingsView } from '../../../shared/types';
+import type { ImageSource, NodeType, OldPrimaryPolicy, RuntimeChoice, SettingsView } from '../../../shared/types';
 import { api, del, formatBytes, post, put } from '../api';
 import { useStore } from '../store';
 import { EyeIcon, TrashIcon, TYPE_LABEL, UploadIcon } from '../components/icons';
@@ -82,6 +82,8 @@ export function SettingsTab() {
         runtime: s.runtime,
         remoteDir: s.remoteDir,
         monitorIntervalSec: s.monitorIntervalSec,
+        oldPrimary: s.oldPrimary,
+        autoHeal: s.autoHeal,
       });
       setSecrets({ password: '', replicaPassword: '', pcpPassword: '' });
       toast('Settings saved. Redeploy nodes to apply cluster changes.', 'ok');
@@ -285,6 +287,32 @@ export function SettingsTab() {
               <span>Remote directory</span>
               <input className="input" value={s.remoteDir} onChange={(e) => set({ remoteDir: e.target.value })} />
               <small>Each node writes its config to &lt;dir&gt;/&lt;node name&gt; (mode 700)</small>
+            </label>
+            <div className="field">
+              <span>Old primary that comes back after a failover</span>
+              <div className="segmented">
+                {(
+                  [
+                    ['rejoin', 'rejoin automatically'],
+                    ['wait', 'wait for me'],
+                  ] as Array<[OldPrimaryPolicy, string]>
+                ).map(([k, label]) => (
+                  <button key={k} className={s.oldPrimary === k ? 'on' : ''} onClick={() => set({ oldPrimary: k })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <small>
+                rejoin = it becomes a replica of the current primary (pg_rewind, or a fresh copy if that fails). wait = it does not start
+                (never a second primary); you choose Rejoin or Rebuild in its inspector. Redeploy the PostgreSQL nodes to apply.
+              </small>
+            </div>
+            <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={s.autoHeal !== false} onChange={(e) => set({ autoHeal: e.target.checked })} />
+              <span style={{ textTransform: 'none', letterSpacing: 0 }}>
+                Auto-heal: after an outage, rejoin old primaries (with "rejoin automatically") and re-attach healthy nodes that
+                Pgpool-II keeps detached
+              </span>
             </label>
             <label className="field">
               <span>Monitoring interval (s)</span>

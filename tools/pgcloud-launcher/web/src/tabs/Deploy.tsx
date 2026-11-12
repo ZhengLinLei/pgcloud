@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import { post, timeAgo } from '../api';
 import { useStore } from '../store';
-import { RocketIcon, TYPE_COLOR, TypeIcon } from '../components/icons';
+import { RocketIcon, TrashIcon, TYPE_COLOR, TypeIcon } from '../components/icons';
 import { Confirm, RoleBadge, StatusBadge, Terminal } from '../components/ui';
 import './deploy.css';
 
 export function DeployTab() {
-  const { validation, deployments, current, logs, loadLog, live, settings, toast } = useStore();
+  const { validation, deployments, current, logs, loadLog, live, settings, toast, nodes } = useStore();
   const [selected, setSelected] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [confirmRebuild, setConfirmRebuild] = useState(false);
   const shownId = selected ?? current?.id ?? deployments[0]?.id ?? null;
   const shown = deployments.find((d) => d.id === shownId);
 
@@ -96,6 +97,19 @@ export function DeployTab() {
             {deployments.length === 0 && <div className="faint" style={{ padding: 14 }}>No operations yet.</div>}
           </div>
         </div>
+
+        <div className="panel danger-zone">
+          <div className="panel-title">Danger zone</div>
+          <div className="panel-body">
+            <p className="faint" style={{ marginTop: 0 }}>
+              Cluster beyond repair, or a test environment to start again? This deletes every container, <b>all the data</b> and the
+              configuration of every node, then deploys the cluster from scratch as drawn.
+            </p>
+            <button className="btn danger" disabled={!!current || nodes.length === 0} onClick={() => setConfirmRebuild(true)}>
+              <TrashIcon /> Destroy &amp; rebuild cluster
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="panel deploy-console">
@@ -118,6 +132,23 @@ export function DeployTab() {
         </div>
       </div>
 
+      {confirmRebuild && (
+        <Confirm
+          title="Destroy & rebuild cluster"
+          message={
+            <>
+              Every node is destroyed: containers, <b>PostgreSQL data volumes</b> and configuration on{' '}
+              <b>{new Set(nodes.map((n) => n.ssh.host)).size}</b> host(s). Then the cluster is deployed from scratch, with an empty
+              database. <b>This cannot be undone</b>: take a backup first if you need the data.
+            </>
+          }
+          confirmText="Destroy & rebuild"
+          danger
+          requireText="DESTROY"
+          onConfirm={() => post('/api/rebuild-cluster', { confirm: 'DESTROY' }).catch((e) => toast((e as Error).message, 'error'))}
+          onClose={() => setConfirmRebuild(false)}
+        />
+      )}
       {confirm && (
         <Confirm
           title="Deploy cluster"

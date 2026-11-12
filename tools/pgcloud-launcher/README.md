@@ -112,6 +112,29 @@ Writes are not accepted while it runs (about a minute in the test servers: 3 Pos
 
 **Make watchdog leader** (on a Pgpool-II node, when two or more are deployed): the inspector shows whether the node is the watchdog LEADER or STANDBY. The button restarts the current leader so that the others elect a new one, until the chosen node leads. Clients connected to the restarted node reconnect after a few seconds. Use three or more Pgpool-II nodes: with two, the one left alone has no quorum.
 
+## Outages and recovery
+
+**What PgCloud recovers by itself** (tested on three servers):
+
+| Situation | What happens | Measured |
+|---|---|---|
+| The server of the primary goes down | Pgpool-II promotes a replica; the drawing follows ("Failover detected… topology updated"). | new primary in ~22 s |
+| That server comes back | The old primary sees a primary on a newer timeline at start and rejoins as a replica (`pg_rewind`); auto-heal attaches it again in Pgpool-II. | replica 6 s after power-on, attached 3 s later |
+| Every server goes down and comes back | Each node starts with the role recorded in its `.env` (kept up to date by promote, redirect, rewind and the launcher); replicas stream again. | cluster usable 18 s after power-on |
+| Pgpool-II keeps a healthy node detached | Auto-heal attaches it; a standby Pgpool-II out of sync with the watchdog leader is restarted to copy the leader's view. | 3–8 s |
+
+The mechanisms, in order: role persisted in each node's `.env`; a start-up guard (`PEER_HOSTS`: a node configured as primary that finds a primary on a newer timeline is an old primary, see *Settings → Old primary that comes back*); Pgpool-II `detach_false_primary = on` (if two primaries run anyway, the one without streaming replicas is detached, so writes reach only the real one); `auto_failback = on` for replicas; and the launcher's **auto-heal** (*Settings → Auto-heal*, on by default), which rejoins old primaries and re-attaches healthy nodes, one action at a time, at most once every two minutes per node.
+
+**What cannot be recovered automatically**
+
+- Two primaries that both accepted writes (clients connected straight to PostgreSQL, bypassing Pgpool-II): rejoining one discards its writes. Connect applications only through PgBouncer / Pgpool-II.
+- The data of every node lost (disks): only a backup brings it back. PgCloud has no scheduled backups or WAL archiving yet: use your own tool (for example pgBackRest or `pg_basebackup` to another place).
+- Two nodes that both believe they are the primary and start at exactly the same moment cannot see each other at start; `detach_false_primary` and auto-heal resolve it right after.
+
+**Prevention**: keep synchronous replication on (a promoted replica has every committed transaction), use three or more Pgpool-II nodes (watchdog quorum), choose *wait for me* if you prefer to decide about old primaries yourself, and keep backups outside the cluster.
+
+**Destroy & rebuild cluster** (Deploy tab → Danger zone, type `DESTROY`): deletes every container, PostgreSQL data volume and configuration directory of every node and deploys the cluster again from the drawing, with empty databases. For a cluster beyond repair or a test environment. It cannot be undone.
+
 ## Security
 
 - One admin account. Every API call and the WebSocket require a session (HttpOnly, SameSite=Strict cookie, 12 h).
